@@ -7,20 +7,32 @@ import {
   Pressable,
   RefreshControl,
   ActivityIndicator,
-  ScrollView,
+  Platform,
 } from "react-native"
 import type { NativeStackScreenProps } from "@react-navigation/native-stack"
 import type { RootStackParamList } from "../navigation"
 import type { Flight, FlightDirection, FlightStatus } from "../types"
 import { fetchFlights } from "../api"
-import { useTheme, type Theme } from "../theme"
-import { StatusBadge, TimeDisplay, AirlineLogo, DelayBadge, AircraftIcon } from "../components"
+import { fetchLiveAircraft, type LiveAircraft } from "../opensky"
+import { buildMatchMap } from "../matchFlights"
+import { useTheme, statusColor, type Theme } from "../theme"
+import {
+  StatusBadge,
+  AirlineLogo,
+  DelayBadge,
+  AircraftIcon,
+  Chip,
+  Toggle,
+  RouteProgress,
+} from "../components"
 import {
   bearingDeg,
   delayMinutes,
   effectiveTime,
   estimateDurationMin,
+  flightProgress,
   fmtDuration,
+  fmtTime,
   haversineKm,
   isTerminalStatus,
   minutesUntil,
@@ -35,13 +47,13 @@ type Props = NativeStackScreenProps<RootStackParamList, "Flights">
 type EtaFilter = "all" | "30m" | "2h" | "active" | "delayed" | "cancelled" | "past"
 
 const ETA_FILTERS: { id: EtaFilter; label: string }[] = [
-  { id: "all", label: "Vše" },
-  { id: "30m", label: "≤ 30 min" },
-  { id: "2h", label: "≤ 2 h" },
   { id: "active", label: "Aktivní" },
+  { id: "30m", label: "≤ 30 m" },
+  { id: "2h", label: "≤ 2 h" },
   { id: "delayed", label: "Zpožděné" },
   { id: "cancelled", label: "Zrušené" },
-  { id: "past", label: "Přistálé / odlétlé" },
+  { id: "past", label: "Dokončené" },
+  { id: "all", label: "Vše" },
 ]
 
 const STATUS_FILTERS: ("All" | FlightStatus)[] = [
@@ -103,6 +115,7 @@ export const FlightsScreen: React.FC<Props> = ({ navigation }) => {
   const [statusFilter, setStatusFilter] = useState<"All" | FlightStatus>("All")
   const [showStatusFilter, setShowStatusFilter] = useState(false)
   const [flights, setFlights] = useState<Flight[]>([])
+  const [live, setLive] = useState<LiveAircraft[]>([])
   const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -114,9 +127,13 @@ export const FlightsScreen: React.FC<Props> = ({ navigation }) => {
       else setLoading(true)
       setError(null)
       try {
-        const { flights, isMock } = await fetchFlights(direction)
+        const [{ flights, isMock }, liveRes] = await Promise.all([
+          fetchFlights(direction),
+          fetchLiveAircraft().catch(() => [] as LiveAircraft[]),
+        ])
         setFlights(flights)
         setIsMock(isMock)
+        setLive(liveRes)
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e))
       } finally {
@@ -132,6 +149,16 @@ export const FlightsScreen: React.FC<Props> = ({ navigation }) => {
     const id = setInterval(() => load(true), 60_000)
     return () => clearInterval(id)
   }, [load])
+
+  const liveMatch = useMemo(() => buildMatchMap(live, flights), [live, flights])
+  const liveByFlightId = useMemo(() => {
+    const m = new Map<string, LiveAircraft>()
+    for (const a of live) {
+      const f = liveMatch.get(a.icao24)
+      if (f) m.set(f.id, a)
+    }
+    return m
+  }, [live, liveMatch])
 
   const etaCounts = useMemo(() => {
     const counts: Record<EtaFilter, number> = {
@@ -161,161 +188,126 @@ export const FlightsScreen: React.FC<Props> = ({ navigation }) => {
   }, [flights, etaFilter, statusFilter])
 
   return (
-    <View style={[styles.container, { backgroundColor: t.bg }]}>
-      {/* Direction toggle */}
-      <View style={[styles.toggle, { backgroundColor: t.card, borderColor: t.border }]}>
-        {(["arrival", "departure"] as FlightDirection[]).map((d) => {
-          const active = direction === d
-          return (
-            <Pressable
-              key={d}
-              onPress={() => setDirection(d)}
-              style={[styles.toggleBtn, active && { backgroundColor: t.accent }]}
-            >
-              <Text style={[styles.toggleText, { color: active ? "#fff" : t.text }]}>
-                {d === "departure" ? "✈ Odlety" : "🛬 Přílety"}
-              </Text>
-            </Pressable>
-          )
-        })}
-      </View>
+    <View style={[styles.outer, { backgroundColor: t.bg }]}>
+      <View style={styles.constrained}>
+        <View style={styles.topRow}>
+          <Toggle
+            value={direction}
+            onChange={(v) => setDirection(v as FlightDirection)}
+            options={[
+              { id: "arrival", label: "🛬  Přílety" },
+              { id: "departure", label: "✈  Odlety" },
+            ]}
+          />
+        </View>
 
-      {/* ETA filter chips */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.filterRow}
-      >
-        {ETA_FILTERS.map((f) => {
-          const active = etaFilter === f.id
-          const count = etaCounts[f.id]
-          return (
-            <Pressable
+        <View style={styles.chipsRow}>
+          {ETA_FILTERS.map((f) => (
+            <Chip
               key={f.id}
+              label={f.label}
+              active={etaFilter === f.id}
+              count={etaCounts[f.id]}
               onPress={() => setEtaFilter(f.id)}
-              style={[
-                styles.chip,
-                { borderColor: t.border, backgroundColor: active ? t.accent : t.card },
-              ]}
-            >
-              <Text style={[styles.chipText, { color: active ? "#fff" : t.text }]}>
-                {f.label}
-                <Text style={{ color: active ? "#fff" : t.textMuted, fontWeight: "400" }}>
-                  {"  "}
-                  {count}
-                </Text>
-              </Text>
-            </Pressable>
-          )
-        })}
-      </ScrollView>
+            />
+          ))}
+        </View>
 
-      {/* Status filter (collapsible) */}
-      <Pressable
-        onPress={() => setShowStatusFilter((v) => !v)}
-        style={styles.statusToggle}
-      >
-        <Text style={[styles.statusToggleText, { color: t.textMuted }]}>
-          {showStatusFilter ? "▾" : "▸"} Filtr dle stavu
-          {statusFilter !== "All" ? `: ${statusFilter}` : ""}
-        </Text>
-      </Pressable>
-      {showStatusFilter && (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filterRow}
-        >
-          {STATUS_FILTERS.map((s) => {
-            const active = statusFilter === s
-            return (
-              <Pressable
-                key={s}
-                onPress={() => setStatusFilter(s)}
-                style={[
-                  styles.chip,
-                  { borderColor: t.border, backgroundColor: active ? t.accent : t.card },
-                ]}
-              >
-                <Text style={[styles.chipText, { color: active ? "#fff" : t.text }]}>{s}</Text>
-              </Pressable>
-            )
-          })}
-        </ScrollView>
-      )}
-
-      {isMock && (
-        <View style={[styles.banner, { backgroundColor: t.warning }]}>
-          <Text style={styles.bannerText}>
-            ⚠️ Ukázková data — nastav EXPO_PUBLIC_RAPIDAPI_KEY v .env (viz README)
+        <Pressable onPress={() => setShowStatusFilter((v) => !v)} style={styles.statusToggle}>
+          <Text style={[styles.statusToggleText, { color: t.textMuted }]}>
+            {showStatusFilter ? "▾" : "▸"} Filtr dle stavu
+            {statusFilter !== "All" ? `: ${statusFilter}` : ""}
           </Text>
-        </View>
-      )}
+        </Pressable>
+        {showStatusFilter && (
+          <View style={styles.chipsRow}>
+            {STATUS_FILTERS.map((s) => (
+              <Chip
+                key={s}
+                label={s}
+                active={statusFilter === s}
+                onPress={() => setStatusFilter(s)}
+              />
+            ))}
+          </View>
+        )}
 
-      {error && (
-        <View style={[styles.banner, { backgroundColor: t.danger }]}>
-          <Text style={styles.bannerText}>Chyba: {error}</Text>
-        </View>
-      )}
-
-      {loading && flights.length === 0 ? (
-        <View style={styles.center}>
-          <ActivityIndicator color={t.accent} />
-        </View>
-      ) : (
-        <FlatList
-          data={filtered}
-          keyExtractor={(f) => f.id}
-          contentContainerStyle={{ padding: 12, paddingBottom: 24 }}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={() => load(true)}
-              tintColor={t.accent}
-            />
-          }
-          ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
-          ListEmptyComponent={
-            <Text style={[styles.empty, { color: t.textMuted }]}>
-              Žádné lety pro tento filtr.
+        {isMock && (
+          <View style={[styles.banner, { backgroundColor: t.warning }]}>
+            <Text style={styles.bannerText}>
+              ⚠️ Ukázková data — nastav EXPO_PUBLIC_RAPIDAPI_KEY v .env (viz README)
             </Text>
-          }
-          renderItem={({ item }) => (
-            <FlightRow
-              flight={item}
-              direction={direction}
-              onPress={() => navigation.navigate("FlightDetail", { flight: item })}
-              onMap={() => navigation.navigate("Map", { focusFlightId: item.id })}
-              t={t}
-            />
-          )}
-        />
-      )}
+          </View>
+        )}
+        {error && (
+          <View style={[styles.banner, { backgroundColor: t.danger }]}>
+            <Text style={styles.bannerText}>Chyba: {error}</Text>
+          </View>
+        )}
+
+        {loading && flights.length === 0 ? (
+          <View style={styles.center}>
+            <ActivityIndicator color={t.accent} />
+          </View>
+        ) : (
+          <FlatList
+            data={filtered}
+            keyExtractor={(f) => f.id}
+            contentContainerStyle={styles.listContent}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={() => load(true)}
+                tintColor={t.accent}
+              />
+            }
+            ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
+            ListEmptyComponent={
+              <Text style={[styles.empty, { color: t.textMuted }]}>
+                Žádné lety pro tento filtr.
+              </Text>
+            }
+            renderItem={({ item }) => (
+              <FlightCard
+                flight={item}
+                direction={direction}
+                live={liveByFlightId.get(item.id)}
+                onPress={() => navigation.navigate("FlightDetail", { flight: item })}
+                onMap={() => navigation.navigate("Map", { focusFlightId: item.id })}
+                t={t}
+              />
+            )}
+          />
+        )}
+      </View>
     </View>
   )
 }
 
-// --- Row -------------------------------------------------------------------
+// --- Card ------------------------------------------------------------------
 
-const FlightRow: React.FC<{
+const FlightCard: React.FC<{
   flight: Flight
   direction: FlightDirection
+  live?: LiveAircraft
   onPress: () => void
   onMap: () => void
   t: Theme
-}> = ({ flight, direction, onPress, onMap, t }) => {
+}> = ({ flight, direction, live, onPress, onMap, t }) => {
   const eta = minutesUntil(effectiveTime(flight))
   const heading = bearingForFlight(flight)
   const distance = distanceForFlight(flight)
   const duration = distance ? estimateDurationMin(distance) : null
   const delay = delayMinutes(flight)
+  const progress = flightProgress(flight, live)
   const isEarly = delay < 0 && !isTerminalStatus(flight)
   const isImminent = !isTerminalStatus(flight) && eta >= 0 && eta <= 30
   const isDelayed = delay >= 15 && !isTerminalStatus(flight)
   const isCancelled = flight.status === "Cancelled"
+  const arrived = flight.status === "Arrived" || flight.status === "Departed"
 
-  // Border color encodes "watchworthy" state.
-  const borderColor = isCancelled
+  // Left stripe color: priority cancelled > delayed > imminent > early > arrived > none
+  const stripeColor = isCancelled
     ? t.danger
     : isImminent
       ? t.accent
@@ -323,8 +315,15 @@ const FlightRow: React.FC<{
         ? t.warning
         : isEarly
           ? t.success
-          : t.border
-  const borderWidth = isCancelled || isImminent || isDelayed || isEarly ? 2 : 1
+          : arrived
+            ? t.textMuted
+            : t.border
+
+  const trackColor = isCancelled ? t.danger : statusColor(flight.status, t)
+  const origin = direction === "arrival" ? flight.counterpart : { iata: "PRG", city: "Praha", name: "Praha" }
+  const dest = direction === "arrival" ? { iata: "PRG", city: "Praha", name: "Praha" } : flight.counterpart
+  const schedTime = fmtTime(flight.scheduledTime)
+  const actualTime = flight.actualTime ? fmtTime(flight.actualTime) : null
 
   return (
     <Pressable
@@ -333,134 +332,199 @@ const FlightRow: React.FC<{
         styles.card,
         {
           backgroundColor: t.card,
-          borderColor,
-          borderWidth,
-          opacity: pressed ? 0.7 : isTerminalStatus(flight) && !isCancelled ? 0.78 : 1,
+          borderColor: t.border,
+          opacity: pressed ? 0.78 : arrived && !isCancelled ? 0.82 : 1,
         },
       ]}
     >
-      <View style={styles.cardLeft}>
-        <TimeDisplay flight={flight} />
-        <Text style={[styles.flightNumber, { color: t.textMuted }]}>{flight.number}</Text>
-        {isImminent && eta >= 0 && (
-          <View style={[styles.etaPill, { backgroundColor: t.accent }]}>
-            <Text style={styles.etaPillText}>za {eta} min</Text>
+      {/* Left status stripe */}
+      <View style={[styles.stripe, { backgroundColor: stripeColor }]} />
+
+      <View style={styles.cardBody}>
+        {/* Header row: time, airline+number, terminal */}
+        <View style={styles.headerRow}>
+          <View style={styles.timeCol}>
+            <Text style={[styles.timeMain, { color: actualTime ? t.textMuted : t.text, fontFamily: t.mono, textDecorationLine: actualTime ? "line-through" : "none" }]}>
+              {schedTime}
+            </Text>
+            {actualTime && (
+              <Text style={[styles.timeActual, { color: isEarly ? t.success : isDelayed ? t.warning : t.text, fontFamily: t.mono }]}>
+                {actualTime}
+              </Text>
+            )}
           </View>
-        )}
-      </View>
-      <View style={styles.cardMiddle}>
-        <View style={styles.airlineRow}>
-          <AirlineLogo iata={flight.airlineIata} size={22} />
-          <Text style={[styles.airline, { color: t.textMuted }]} numberOfLines={1}>
-            {flight.airlineName}
-          </Text>
+
+          <View style={styles.airlineCol}>
+            <View style={styles.airlineRow}>
+              <AirlineLogo iata={flight.airlineIata} size={20} />
+              <Text style={[styles.flightNo, { color: t.text, fontFamily: t.mono }]}>{flight.number}</Text>
+              <Text style={[styles.airlineName, { color: t.textMuted }]} numberOfLines={1}>
+                {flight.airlineName}
+              </Text>
+            </View>
+            {(flight.aircraftModel || flight.aircraftReg) && (
+              <View style={styles.aircraftRow}>
+                <AircraftIcon flight={flight} headingDeg={null} color={t.textMuted} />
+                <Text style={[styles.aircraftText, { color: t.textMuted }]} numberOfLines={1}>
+                  {[flight.aircraftModel, flight.aircraftReg].filter(Boolean).join(" · ")}
+                </Text>
+              </View>
+            )}
+          </View>
+
+          <View style={styles.terminalCol}>
+            {flight.terminal && (
+              <Text style={[styles.terminalText, { color: t.text }]}>T{flight.terminal}</Text>
+            )}
+            {flight.gate && (
+              <Text style={[styles.gateText, { color: t.textMuted }]}>{flight.gate}</Text>
+            )}
+            <Pressable
+              hitSlop={8}
+              onPress={(e) => {
+                e.stopPropagation()
+                onMap()
+              }}
+              style={({ pressed }) => [
+                styles.mapBtn,
+                { borderColor: t.border, backgroundColor: t.cardTint, opacity: pressed ? 0.5 : 1 },
+              ]}
+            >
+              <Text style={{ fontSize: 13 }}>🗺️</Text>
+            </Pressable>
+          </View>
         </View>
+
+        {/* Route row: origin code — progress — dest code */}
         <View style={styles.routeRow}>
-          <AircraftIcon
-            flight={flight}
-            headingDeg={heading}
-            color={isImminent ? t.accent : t.text}
-          />
-          <Text style={[styles.airport, { color: t.text }]} numberOfLines={1}>
-            {"  "}
-            {direction === "departure" ? "→ " : "← z "}
-            {flight.counterpart.city ?? flight.counterpart.name}
-            {flight.counterpart.iata ? ` (${flight.counterpart.iata})` : ""}
-          </Text>
+          <View style={styles.iataCol}>
+            <Text style={[styles.iataText, { color: t.text, fontFamily: t.mono }]}>
+              {origin.iata ?? "—"}
+            </Text>
+            <Text style={[styles.cityText, { color: t.textMuted }]} numberOfLines={1}>
+              {origin.city ?? origin.name}
+            </Text>
+          </View>
+          <View style={styles.progressCol}>
+            {progress != null ? (
+              <RouteProgress progress={progress} color={trackColor} heading={heading} />
+            ) : (
+              <View style={[styles.progressFallback, { backgroundColor: t.border }]} />
+            )}
+            {progress != null && progress < 1 && !isCancelled && (
+              <Text style={[styles.progressLabel, { color: t.textMuted, fontFamily: t.mono }]}>
+                {Math.round(progress * 100)}%
+                {duration ? `  ·  ~${fmtDuration(duration)}` : ""}
+                {distance ? `  ·  ${Math.round(distance).toLocaleString()} km` : ""}
+              </Text>
+            )}
+            {progress == null && (
+              <Text style={[styles.progressLabel, { color: t.textMuted, fontFamily: t.mono }]}>
+                {duration ? `~${fmtDuration(duration)}` : ""}
+                {distance ? `  ·  ${Math.round(distance).toLocaleString()} km` : ""}
+              </Text>
+            )}
+          </View>
+          <View style={[styles.iataCol, { alignItems: "flex-end" }]}>
+            <Text style={[styles.iataText, { color: t.text, fontFamily: t.mono }]}>
+              {dest.iata ?? "—"}
+            </Text>
+            <Text style={[styles.cityText, { color: t.textMuted }]} numberOfLines={1}>
+              {dest.city ?? dest.name}
+            </Text>
+          </View>
         </View>
-        {(flight.aircraftModel || duration || distance) && (
-          <Text style={[styles.aircraftLine, { color: t.textMuted }]} numberOfLines={1}>
-            {flight.aircraftModel ? `🛩  ${flight.aircraftModel}` : "🛩  —"}
-            {flight.aircraftReg ? ` · ${flight.aircraftReg}` : ""}
-            {duration ? `  ·  ⏱ ${fmtDuration(duration)}` : ""}
-            {distance ? `  ·  ${Math.round(distance)} km` : ""}
-          </Text>
-        )}
-        <View style={styles.statusRow}>
+
+        {/* Footer: status + delay + ETA */}
+        <View style={styles.footerRow}>
           <StatusBadge flight={flight} />
           <DelayBadge flight={flight} threshold={1} />
+          {isImminent && eta >= 0 && (
+            <View style={[styles.etaPill, { backgroundColor: t.accent }]}>
+              <Text style={styles.etaPillText}>za {eta} min</Text>
+            </View>
+          )}
+          {live && !live.onGround && live.altitudeFt != null && (
+            <Text style={[styles.liveMeta, { color: t.success, fontFamily: t.mono }]}>
+              ▲ {Math.round(live.altitudeFt).toLocaleString()} ft
+              {live.groundSpeedKt != null ? ` · ${Math.round(live.groundSpeedKt)} kt` : ""}
+            </Text>
+          )}
         </View>
-      </View>
-      <View style={styles.cardRight}>
-        {!!flight.terminal && (
-          <Text style={[styles.gate, { color: t.text }]}>T{flight.terminal}</Text>
-        )}
-        {!!flight.gate && (
-          <Text style={[styles.gateSub, { color: t.textMuted }]}>Gate {flight.gate}</Text>
-        )}
-        <Pressable
-          hitSlop={8}
-          onPress={(e) => {
-            e.stopPropagation()
-            onMap()
-          }}
-          style={({ pressed }) => [
-            styles.mapBtn,
-            { borderColor: t.border, opacity: pressed ? 0.5 : 1 },
-          ]}
-        >
-          <Text style={{ fontSize: 14 }}>🗺️</Text>
-        </Pressable>
       </View>
     </Pressable>
   )
 }
 
+// --- Styles ----------------------------------------------------------------
+
+const MAX_WIDTH = 760
+
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  toggle: {
+  outer: { flex: 1, alignItems: Platform.OS === "web" ? "center" : "stretch" },
+  constrained: { flex: 1, width: "100%", maxWidth: MAX_WIDTH },
+  topRow: { paddingHorizontal: 12, paddingTop: 12, paddingBottom: 6 },
+  chipsRow: {
     flexDirection: "row",
-    margin: 12,
-    marginBottom: 6,
-    borderRadius: 12,
-    padding: 4,
-    borderWidth: 1,
+    flexWrap: "wrap",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingBottom: 6,
   },
-  toggleBtn: { flex: 1, paddingVertical: 10, alignItems: "center", borderRadius: 9 },
-  toggleText: { fontSize: 15, fontWeight: "600" },
-  filterRow: { paddingHorizontal: 12, paddingBottom: 8, gap: 6, flexDirection: "row" },
-  chip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, borderWidth: 1 },
-  chipText: { fontSize: 13, fontWeight: "500" },
-  statusToggle: { paddingHorizontal: 14, paddingTop: 2, paddingBottom: 4 },
+  statusToggle: { paddingHorizontal: 14, paddingTop: 4, paddingBottom: 4 },
   statusToggleText: { fontSize: 12, fontWeight: "500" },
   banner: { padding: 8, marginHorizontal: 12, borderRadius: 8, marginBottom: 4 },
   bannerText: { color: "#fff", fontSize: 12, fontWeight: "500" },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
   empty: { textAlign: "center", marginTop: 40 },
+  listContent: { padding: 12, paddingBottom: 24 },
+
   card: {
     flexDirection: "row",
-    padding: 12,
-    borderRadius: 12,
-    gap: 12,
-    alignItems: "center",
+    borderRadius: 10,
+    borderWidth: 1,
+    overflow: "hidden",
   },
-  cardLeft: { minWidth: 78 },
-  cardMiddle: { flex: 1 },
-  cardRight: { alignItems: "flex-end", minWidth: 56, gap: 4 },
-  flightNumber: { fontSize: 11, marginTop: 2 },
-  etaPill: {
-    marginTop: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 999,
-    alignSelf: "flex-start",
-  },
-  etaPillText: { color: "#fff", fontSize: 10, fontWeight: "700" },
-  routeRow: { flexDirection: "row", alignItems: "center", marginTop: 4 },
-  airport: { fontSize: 15, fontWeight: "600", flexShrink: 1 },
+  stripe: { width: 4, alignSelf: "stretch" },
+  cardBody: { flex: 1, padding: 12, gap: 10 },
+
+  headerRow: { flexDirection: "row", gap: 12, alignItems: "flex-start" },
+  timeCol: { minWidth: 60 },
+  timeMain: { fontSize: 18, fontWeight: "700", lineHeight: 22 },
+  timeActual: { fontSize: 14, fontWeight: "700", lineHeight: 18 },
+  airlineCol: { flex: 1, gap: 4 },
   airlineRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  airline: { fontSize: 12, flex: 1 },
-  aircraftLine: { fontSize: 11, marginTop: 4 },
-  statusRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 6, flexWrap: "wrap" },
-  gate: { fontSize: 14, fontWeight: "600" },
-  gateSub: { fontSize: 11, marginTop: 2 },
+  flightNo: { fontSize: 14, fontWeight: "700" },
+  airlineName: { fontSize: 12, flex: 1 },
+  aircraftRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  aircraftText: { fontSize: 11 },
+  terminalCol: { alignItems: "flex-end", gap: 3, minWidth: 50 },
+  terminalText: { fontSize: 14, fontWeight: "700" },
+  gateText: { fontSize: 11 },
   mapBtn: {
-    marginTop: 4,
+    marginTop: 2,
     width: 30,
     height: 30,
-    borderRadius: 8,
+    borderRadius: 7,
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
   },
+
+  routeRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  iataCol: { minWidth: 56, gap: 2 },
+  iataText: { fontSize: 16, fontWeight: "700", letterSpacing: 0.5 },
+  cityText: { fontSize: 11 },
+  progressCol: { flex: 1, gap: 4 },
+  progressFallback: { height: 2, borderRadius: 1 },
+  progressLabel: { fontSize: 10, textAlign: "center" },
+
+  footerRow: { flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" },
+  etaPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  etaPillText: { color: "#fff", fontSize: 11, fontWeight: "700" },
+  liveMeta: { fontSize: 11, fontWeight: "600", marginLeft: "auto" },
 })

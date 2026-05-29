@@ -1,5 +1,5 @@
 import React from "react"
-import { View, Text, Image, StyleSheet } from "react-native"
+import { View, Text, Image, StyleSheet, Pressable } from "react-native"
 import { useTheme, statusColor } from "./theme"
 import type { Flight } from "./types"
 import {
@@ -152,6 +152,205 @@ export const AirlineLogo: React.FC<{ iata?: string; size?: number }> = ({ iata, 
     />
   )
 }
+
+/**
+ * Compact pill-shaped filter chip — rectangular with rounded corners, not
+ * a balloon. Optional trailing count.
+ */
+export const Chip: React.FC<{
+  label: string
+  active: boolean
+  count?: number
+  onPress: () => void
+}> = ({ label, active, count, onPress }) => {
+  const t = useTheme()
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        chipStyles.base,
+        {
+          backgroundColor: active ? t.accent : t.card,
+          borderColor: active ? t.accent : t.border,
+          opacity: pressed ? 0.7 : 1,
+        },
+      ]}
+    >
+      <Text
+        style={[
+          chipStyles.label,
+          { color: active ? "#fff" : t.text },
+        ]}
+      >
+        {label}
+      </Text>
+      {typeof count === "number" && (
+        <Text
+          style={[
+            chipStyles.count,
+            {
+              color: active ? "rgba(255,255,255,0.85)" : t.textMuted,
+              backgroundColor: active ? "rgba(255,255,255,0.18)" : t.cardTint,
+              fontFamily: t.mono,
+            },
+          ]}
+        >
+          {count}
+        </Text>
+      )}
+    </Pressable>
+  )
+}
+
+const chipStyles = StyleSheet.create({
+  base: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+    borderWidth: 1,
+    height: 30,
+  },
+  label: { fontSize: 12, fontWeight: "600", letterSpacing: 0.1 },
+  count: {
+    fontSize: 11,
+    fontWeight: "700",
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 4,
+    minWidth: 18,
+    textAlign: "center",
+  },
+})
+
+/** Segmented control toggle (two options). */
+export const Toggle: React.FC<{
+  options: { id: string; label: string }[]
+  value: string
+  onChange: (id: string) => void
+}> = ({ options, value, onChange }) => {
+  const t = useTheme()
+  return (
+    <View
+      style={[toggleStyles.container, { backgroundColor: t.cardTint, borderColor: t.border }]}
+    >
+      {options.map((o) => {
+        const active = o.id === value
+        return (
+          <Pressable
+            key={o.id}
+            onPress={() => onChange(o.id)}
+            style={[
+              toggleStyles.btn,
+              active && { backgroundColor: t.accent, shadowOpacity: 0.15 },
+            ]}
+          >
+            <Text style={[toggleStyles.label, { color: active ? "#fff" : t.text }]}>
+              {o.label}
+            </Text>
+          </Pressable>
+        )
+      })}
+    </View>
+  )
+}
+
+const toggleStyles = StyleSheet.create({
+  container: {
+    flexDirection: "row",
+    borderRadius: 8,
+    padding: 3,
+    borderWidth: 1,
+    alignSelf: "stretch",
+  },
+  btn: {
+    flex: 1,
+    paddingVertical: 7,
+    alignItems: "center",
+    borderRadius: 6,
+  },
+  label: { fontSize: 13, fontWeight: "600" },
+})
+
+/**
+ * Horizontal route progress bar with a plane glyph at the current progress.
+ * FR24-inspired. progress is 0..1.
+ */
+export const RouteProgress: React.FC<{
+  progress: number
+  color: string
+  heading?: number | null
+  showEndpoints?: boolean
+}> = ({ progress, color, heading, showEndpoints = true }) => {
+  const t = useTheme()
+  const pct = Math.max(0, Math.min(1, progress))
+  const rot = heading == null ? 0 : heading - 45
+  return (
+    <View style={routeStyles.wrap}>
+      {showEndpoints && (
+        <View style={[routeStyles.endpoint, { backgroundColor: color }]} />
+      )}
+      <View style={[routeStyles.track, { backgroundColor: t.border }]}>
+        <View
+          style={[
+            routeStyles.fill,
+            { width: `${pct * 100}%`, backgroundColor: color },
+          ]}
+        />
+        <View
+          style={[
+            routeStyles.dot,
+            { left: `${pct * 100}%`, backgroundColor: t.card, borderColor: color },
+          ]}
+        >
+          <Text
+            style={{
+              color,
+              fontSize: 11,
+              lineHeight: 11,
+              transform: [{ rotate: `${rot}deg` }],
+            }}
+          >
+            ✈
+          </Text>
+        </View>
+      </View>
+      {showEndpoints && (
+        <View
+          style={[
+            routeStyles.endpoint,
+            { backgroundColor: pct >= 1 ? color : t.border },
+          ]}
+        />
+      )}
+    </View>
+  )
+}
+
+const routeStyles = StyleSheet.create({
+  wrap: { flexDirection: "row", alignItems: "center", gap: 4 },
+  endpoint: { width: 6, height: 6, borderRadius: 3 },
+  track: {
+    flex: 1,
+    height: 2,
+    borderRadius: 1,
+    position: "relative",
+    justifyContent: "center",
+  },
+  fill: { position: "absolute", top: 0, bottom: 0, left: 0, borderRadius: 1 },
+  dot: {
+    position: "absolute",
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 1.5,
+    marginLeft: -9,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+})
 
 const styles = StyleSheet.create({
   badge: {

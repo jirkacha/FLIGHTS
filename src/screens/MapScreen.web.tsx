@@ -17,14 +17,21 @@ import { haversineKm, minutesUntil, PRG_COORDS, fmtTime } from "../utils"
 type Nav = NativeStackNavigationProp<RootStackParamList, "Map">
 type MapRoute = RouteProp<RootStackParamList, "Map">
 
+const PLANE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="100%" height="100%">
+  <path fill="currentColor" stroke="rgba(0,0,0,0.45)" stroke-width="0.6" stroke-linejoin="round"
+    d="M16 1.5 l1.6 9.4 12.4 6.2 v2.6 l-12.4 -3.7 -1 7.4 4.3 2.6 v2 l-5.0 -1.4 -5.0 1.4 v-2 l4.3 -2.6 -1 -7.4 -12.4 3.7 v-2.6 l12.4 -6.2 z"/>
+</svg>`
+
 const planeIcon = (heading = 0, color = "#666", label?: string, selected = false) => {
-  const size = selected ? 40 : 32
+  const size = selected ? 36 : 26
   return L.divIcon({
     className: "plane-marker",
     html: `
       <div style="display:flex; flex-direction:column; align-items:center; transform: translate(-50%, -50%); pointer-events:auto;">
-        <div style="transform: rotate(${heading - 45}deg); color: ${color}; font-size: ${size}px; line-height: ${size}px; text-shadow: 0 0 4px rgba(0,0,0,0.6), 0 0 2px rgba(255,255,255,0.8); filter: drop-shadow(0 1px 2px rgba(0,0,0,0.3));">✈</div>
-        ${label ? `<div style="background:rgba(15,23,42,0.85); color:#fff; font-size:11px; padding:2px 6px; border-radius:4px; margin-top:3px; white-space:nowrap; font-family:system-ui,-apple-system,sans-serif; font-weight:600; box-shadow:0 1px 3px rgba(0,0,0,0.3);">${label}</div>` : ""}
+        <div style="width:${size}px; height:${size}px; transform: rotate(${heading}deg); color:${color}; filter: drop-shadow(0 1px 1.5px rgba(0,0,0,0.5));">
+          ${PLANE_SVG}
+        </div>
+        ${label ? `<div style="background:rgba(15,23,42,0.85); color:#fff; font-size:11px; padding:2px 6px; border-radius:4px; margin-top:3px; white-space:nowrap; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-weight:600; box-shadow:0 1px 3px rgba(0,0,0,0.3); letter-spacing:0.3px;">${label}</div>` : ""}
       </div>
     `,
     iconSize: [0, 0],
@@ -64,12 +71,11 @@ export const MapScreen: React.FC = () => {
 
   useEffect(() => {
     let cancelled = false
-    const load = async () => {
+    const loadAircraft = async () => {
       try {
-        const [ac, fl] = await Promise.all([fetchLiveAircraft(), fetchAllFlights()])
+        const ac = await fetchLiveAircraft()
         if (cancelled) return
         setAircraft(ac)
-        setFlights({ arrivals: fl.arrivals, departures: fl.departures })
         setLastUpdate(new Date())
         setError(null)
       } catch (e) {
@@ -78,8 +84,18 @@ export const MapScreen: React.FC = () => {
         if (!cancelled) setLoading(false)
       }
     }
-    load()
-    const id = setInterval(load, 30_000)
+    const loadFlights = async () => {
+      try {
+        const fl = await fetchAllFlights()
+        if (cancelled) return
+        setFlights({ arrivals: fl.arrivals, departures: fl.departures })
+      } catch {
+        /* non-fatal — flights enrich the icons but the map still works */
+      }
+    }
+    loadAircraft()
+    loadFlights()
+    const id = setInterval(loadAircraft, 30_000)
     return () => {
       cancelled = true
       clearInterval(id)

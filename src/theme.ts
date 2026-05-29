@@ -1,8 +1,9 @@
-import { useColorScheme } from "react-native"
+import { useColorScheme, Platform } from "react-native"
 
 export type Theme = {
   bg: string
   card: string
+  cardTint: string
   border: string
   text: string
   textMuted: string
@@ -10,30 +11,40 @@ export type Theme = {
   danger: string
   warning: string
   success: string
+  mono: string
 }
 
+const MONO = Platform.select({
+  web: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace',
+  default: "Menlo",
+}) as string
+
 const light: Theme = {
-  bg: "#f6f7f9",
+  bg: "#f4f5f7",
   card: "#ffffff",
-  border: "#e3e6eb",
+  cardTint: "#f8fafc",
+  border: "#e2e6ec",
   text: "#0f172a",
   textMuted: "#64748b",
-  accent: "#0066cc",
+  accent: "#0b62d6",
   danger: "#dc2626",
   warning: "#d97706",
   success: "#16a34a",
+  mono: MONO,
 }
 
 const dark: Theme = {
-  bg: "#0b1220",
-  card: "#121a2b",
-  border: "#1f2a44",
-  text: "#e5edff",
-  textMuted: "#8aa0c5",
-  accent: "#4d9aff",
-  danger: "#f87171",
+  bg: "#070d1a",
+  card: "#101a2e",
+  cardTint: "#0a1324",
+  border: "#1c2842",
+  text: "#e8efff",
+  textMuted: "#8198be",
+  accent: "#5aa1ff",
+  danger: "#fb7185",
   warning: "#fbbf24",
   success: "#4ade80",
+  mono: MONO,
 }
 
 export const useTheme = (): Theme => {

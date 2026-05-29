@@ -2,6 +2,8 @@
  * Shared helpers for time, geography, and flight derivations.
  */
 import type { Flight } from "./types"
+import type { LiveAircraft } from "./opensky"
+import { getAirportCoords } from "./airports"
 
 export const PRG_COORDS: [number, number] = [50.1008, 14.26]
 
@@ -141,3 +143,43 @@ export const fmtDuration = (min: number): string => {
   if (m === 0) return `${h} h`
   return `${h} h ${m} min`
 }
+
+/**
+ * Flight progress (0..1) along the great-circle route between the counterpart
+ * airport and PRG. Combines live ADS-B position (when available) with a
+ * time-based fallback derived from the estimated cruise duration.
+ *
+ * Returns null when the route cannot be located.
+ */
+export const flightProgress = (f: Flight, live?: LiveAircraft | null): number | null => {
+  if (f.status === "Arrived" || f.status === "Departed") return 1
+  if (f.status === "Cancelled") return 0
+
+  const counter = getAirportCoords(f.counterpart.iata)
+  if (!counter) return null
+  const totalKm = haversineKm(counter[0], counter[1], PRG_COORDS[0], PRG_COORDS[1])
+  if (totalKm <= 0) return null
+
+  // Prefer live distance for currently airborne flights.
+  if (live && !live.onGround) {
+    const fromPrg = haversineKm(live.latitude, live.longitude, PRG_COORDS[0], PRG_COORDS[1])
+    const fromOrigin = haversineKm(live.latitude, live.longitude, counter[0], counter[1])
+    if (f.direction === "arrival") {
+      return clamp01(fromOrigin / (fromOrigin + fromPrg))
+    }
+    return clamp01(fromPrg / (fromPrg + fromOrigin))
+  }
+
+  // Time-based fallback: linear from estimated departure to effective arrival.
+  const durMin = estimateDurationMin(totalKm)
+  const ref = Date.parse(effectiveTime(f))
+  if (Number.isNaN(ref)) return null
+  const arrMs = f.direction === "arrival" ? ref : ref + durMin * 60_000
+  const depMs = f.direction === "arrival" ? ref - durMin * 60_000 : ref
+  const now = Date.now()
+  if (now <= depMs) return 0
+  if (now >= arrMs) return 1
+  return clamp01((now - depMs) / (arrMs - depMs))
+}
+
+const clamp01 = (v: number): number => Math.max(0, Math.min(1, v))
