@@ -102,13 +102,20 @@ export const MapScreen: React.FC = () => {
               icon={planeIcon(a.headingDeg)}
             >
               <Popup>
-                <strong>{a.callsign ?? a.icao24}</strong>
+                <strong>{a.callsign ?? a.registration ?? a.icao24}</strong>
                 <br />
-                {a.originCountry && <>Země: {a.originCountry}<br /></>}
-                {a.altitudeM != null && <>Výška: {Math.round(a.altitudeM)} m<br /></>}
-                {a.velocityMs != null && <>Rychlost: {Math.round(a.velocityMs * 3.6)} km/h<br /></>}
+                {a.description && <>{a.description}<br /></>}
+                {!a.description && a.aircraftType && <>Typ: {a.aircraftType}<br /></>}
+                {a.registration && a.callsign && <>Reg: {a.registration}<br /></>}
+                {a.altitudeFt != null && (
+                  <>Výška: {Math.round(a.altitudeFt).toLocaleString()} ft ({Math.round(a.altitudeFt * 0.3048)} m)<br /></>
+                )}
+                {a.groundSpeedKt != null && (
+                  <>Rychlost: {Math.round(a.groundSpeedKt)} kt ({Math.round(a.groundSpeedKt * 1.852)} km/h)<br /></>
+                )}
                 {a.headingDeg != null && <>Směr: {Math.round(a.headingDeg)}°<br /></>}
-                {a.onGround ? "Na zemi" : "Ve vzduchu"}
+                {a.squawk && <>Squawk: {a.squawk}<br /></>}
+                {a.onGround ? "🟢 Na zemi" : "🛫 Ve vzduchu"}
               </Popup>
             </Marker>
           ))}

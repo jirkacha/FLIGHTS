@@ -1,76 +1,92 @@
 /**
- * OpenSky Network — free live aircraft positions (no API key required).
- * https://openskynetwork.github.io/opensky-api/rest.html
+ * Live ADS-B aircraft data — community-aggregated feeds.
+ * Free, no API key, CORS-enabled.
  *
- * Rate limit: anonymous users 400 requests/day, ~10s between requests.
+ * Primary:   https://api.adsb.lol/v2/point/{lat}/{lon}/{radius_nm}
+ * Fallback:  https://api.airplanes.live/v2/point/{lat}/{lon}/{radius_nm}
  */
 
 export type LiveAircraft = {
   icao24: string
   callsign?: string
-  originCountry?: string
+  registration?: string
+  aircraftType?: string
+  description?: string
   longitude: number
   latitude: number
-  altitudeM?: number
-  velocityMs?: number
+  altitudeFt?: number
+  groundSpeedKt?: number
   headingDeg?: number
-  verticalRateMs?: number
+  verticalRateFpm?: number
   onGround: boolean
+  squawk?: string
+  ageSec?: number
 }
 
-// Bounding box around Prague (roughly 200km radius)
-const BBOX = {
-  lamin: 49.0,
-  lomin: 13.0,
-  lamax: 51.0,
-  lomax: 16.5,
+const PRG_LAT = 50.1008
+const PRG_LON = 14.26
+const RADIUS_NM = 100 // ~185 km
+
+type RawAircraft = {
+  hex: string
+  flight?: string
+  r?: string
+  t?: string
+  desc?: string
+  alt_baro?: number | "ground"
+  alt_geom?: number
+  gs?: number
+  track?: number
+  true_heading?: number
+  mag_heading?: number
+  baro_rate?: number
+  squawk?: string
+  lat?: number
+  lon?: number
+  seen_pos?: number
 }
 
-type RawState = [
-  string, // icao24
-  string | null, // callsign
-  string | null, // origin_country
-  number | null, // time_position
-  number | null, // last_contact
-  number | null, // longitude
-  number | null, // latitude
-  number | null, // baro_altitude
-  boolean, // on_ground
-  number | null, // velocity
-  number | null, // true_track (heading)
-  number | null, // vertical_rate
-  number[] | null, // sensors
-  number | null, // geo_altitude
-  string | null, // squawk
-  boolean, // spi
-  number, // position_source
-]
+const mapAircraft = (a: RawAircraft): LiveAircraft | null => {
+  if (a.lat == null || a.lon == null) return null
+  const onGround = a.alt_baro === "ground"
+  return {
+    icao24: a.hex,
+    callsign: a.flight?.trim() || undefined,
+    registration: a.r,
+    aircraftType: a.t,
+    description: a.desc,
+    longitude: a.lon,
+    latitude: a.lat,
+    altitudeFt: typeof a.alt_baro === "number" ? a.alt_baro : a.alt_geom,
+    groundSpeedKt: a.gs,
+    headingDeg: a.track ?? a.true_heading ?? a.mag_heading,
+    verticalRateFpm: a.baro_rate,
+    onGround,
+    squawk: a.squawk,
+    ageSec: a.seen_pos,
+  }
+}
 
-type OpenSkyResponse = {
-  time: number
-  states: RawState[] | null
+const tryFetch = async (url: string): Promise<LiveAircraft[]> => {
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`${url} → HTTP ${res.status}`)
+  const json = (await res.json()) as { ac?: RawAircraft[]; aircraft?: RawAircraft[] }
+  const list = json.ac ?? json.aircraft ?? []
+  return list.map(mapAircraft).filter((x): x is LiveAircraft => x !== null)
 }
 
 export const fetchLiveAircraft = async (): Promise<LiveAircraft[]> => {
-  const url = `https://opensky-network.org/api/states/all?lamin=${BBOX.lamin}&lomin=${BBOX.lomin}&lamax=${BBOX.lamax}&lomax=${BBOX.lomax}`
-  const res = await fetch(url)
-  if (!res.ok) {
-    throw new Error(`OpenSky ${res.status}`)
+  const sources = [
+    `https://api.adsb.lol/v2/point/${PRG_LAT}/${PRG_LON}/${RADIUS_NM}`,
+    `https://api.airplanes.live/v2/point/${PRG_LAT}/${PRG_LON}/${RADIUS_NM}`,
+  ]
+  let lastErr: unknown
+  for (const url of sources) {
+    try {
+      return await tryFetch(url)
+    } catch (e) {
+      lastErr = e
+    }
   }
-  const json = (await res.json()) as OpenSkyResponse
-  const states = json.states ?? []
-  return states
-    .filter((s) => s[5] != null && s[6] != null)
-    .map<LiveAircraft>((s) => ({
-      icao24: s[0],
-      callsign: s[1]?.trim() || undefined,
-      originCountry: s[2] ?? undefined,
-      longitude: s[5] as number,
-      latitude: s[6] as number,
-      altitudeM: s[7] ?? s[13] ?? undefined,
-      velocityMs: s[9] ?? undefined,
-      headingDeg: s[10] ?? undefined,
-      verticalRateMs: s[11] ?? undefined,
-      onGround: s[8],
-    }))
+  throw lastErr instanceof Error ? lastErr : new Error("All ADS-B sources failed")
 }
