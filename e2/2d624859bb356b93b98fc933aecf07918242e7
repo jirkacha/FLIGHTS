@@ -1,0 +1,28 @@
+src/airports.ts
+  s_365bf8e872cd9a::t_07f15d2b95defe 1-2,4-12
+  s_365bf8e872cd9a::t_4b8e064cf7d275 3
+src/screens/MapScreen.web.tsx
+  s_365bf8e872cd9a::t_d139f45e2091f8 79
+  s_365bf8e872cd9a::t_f2bda35c9fa2e0 179-180,182-234
+  s_365bf8e872cd9a::t_d76bf0efd5bc96 319-320
+  s_365bf8e872cd9a::t_61f61aaa75fcc8 3,12
+  s_365bf8e872cd9a::t_1d721ecc31f878 20-22,25-27,33
+src/airports.json
+  ai_agent 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "e22d624859bb356b93b98fc933aecf07918242e7",
+  "prompts": {},
+  "sessions": {
+    "s_365bf8e872cd9a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_190aa0706ffeJkcj653C1rtvIk",
+        "model": "claude-opus-4.7"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
