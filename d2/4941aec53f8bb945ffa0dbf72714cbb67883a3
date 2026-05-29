@@ -1,0 +1,31 @@
+src/planespotters.ts
+  s_d4466cc27ae1bf::t_fc448a80415847 3-4,28-40,42,44,47-48,51,55-79
+src/screens/MapScreen.web.tsx
+  s_d4466cc27ae1bf::t_803d43683504d5 266-267
+  s_d4466cc27ae1bf::t_27bb8b95f071cb 2
+  s_d4466cc27ae1bf::t_a5a87d5dfd25fe 553,557-564
+  s_d4466cc27ae1bf::t_a0abeb0bca009b 350,364-368,371-404,422-430,444-453,458-469
+  s_d4466cc27ae1bf::t_50d71d51eb0ff3 314-316,324,326-345
+src/api.ts
+  s_d4466cc27ae1bf::t_964792382ccb88 81-85
+App.tsx
+  s_d4466cc27ae1bf::t_cf99fb0f0571c6 31-47,58-60
+src/screens/FlightDetailScreen.tsx
+  s_d4466cc27ae1bf::t_07b0415cb23ea2 64,68-70,76
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "d24941aec53f8bb945ffa0dbf72714cbb67883a3",
+  "prompts": {},
+  "sessions": {
+    "s_d4466cc27ae1bf": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_18cdf5031ffeVQFKA1g4CLBe23",
+        "model": "claude-opus-4.7"
+      },
+      "human_author": "jirkacha <jirkacha@gmail.com>"
+    }
+  }
+}
