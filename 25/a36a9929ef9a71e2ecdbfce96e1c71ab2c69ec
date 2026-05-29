@@ -1,0 +1,21 @@
+src/opensky.ts
+  s_365bf8e872cd9a::t_bac989215c04c1 2-3,5-6,12-14,17-18,20,22-23,26-46,49-68,70-75,79-89,91
+src/screens/MapScreen.web.tsx
+  s_365bf8e872cd9a::t_d167f2447b27cd 105,107-115,117-118
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "25a36a9929ef9a71e2ecdbfce96e1c71ab2c69ec",
+  "prompts": {},
+  "sessions": {
+    "s_365bf8e872cd9a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_190aa0706ffeJkcj653C1rtvIk",
+        "model": "claude-opus-4.7"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
