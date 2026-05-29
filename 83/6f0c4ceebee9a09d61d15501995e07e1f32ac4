@@ -1,0 +1,38 @@
+App.tsx
+  s_d4466cc27ae1bf::t_7b3461abd0d3d8 37
+src/utils.ts
+  s_d4466cc27ae1bf::t_da9baf32bcbf7f 1-70
+src/api.ts
+  s_d4466cc27ae1bf::t_cfa2d8f4198059 81-84,91-93,96
+  s_d4466cc27ae1bf::t_f363c2b43f7f53 3
+src/screens/MapScreen.web.tsx
+  s_d4466cc27ae1bf::t_a12ed7b5f93a22 3-4,15,18
+  s_d4466cc27ae1bf::t_18368842380b7d 97-112
+  s_d4466cc27ae1bf::t_7af6b4c38635df 40-47,52-53,63
+  s_d4466cc27ae1bf::t_4978692ac7c743 156
+src/navigation.ts
+  s_d4466cc27ae1bf::t_7c47a8f5c074a8 6
+src/screens/FlightDetailScreen.tsx
+  s_d4466cc27ae1bf::t_66eeed39d447b0 115
+src/screens/FlightsScreen.tsx
+  s_d4466cc27ae1bf::t_f848d419bcbc1f 17-26,44-45,49-62,72,99-100,107-114,116,118-142,163-184,228-231,240-242,246-273,275-278,281-282,289,291-297,305,307,309-311,321,341-348,355,357,367-379,390,397-398,411,415-423,433,443-444,448,451-459
+  s_d4466cc27ae1bf::t_c26ba403a6d4d3 115,117
+src/components.tsx
+  s_d4466cc27ae1bf::t_2360c402f7145b 5,41-82,125-131
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "836f0c4ceebee9a09d61d15501995e07e1f32ac4",
+  "prompts": {},
+  "sessions": {
+    "s_d4466cc27ae1bf": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_18cdf5031ffeVQFKA1g4CLBe23",
+        "model": "claude-opus-4.7"
+      },
+      "human_author": "jirkacha <jirkacha@gmail.com>"
+    }
+  }
+}
