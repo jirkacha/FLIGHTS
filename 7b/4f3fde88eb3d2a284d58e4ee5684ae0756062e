@@ -1,0 +1,29 @@
+src/utils.ts
+  s_2d5a555e9490ea::t_c18d8e4b9c9d58 68-90
+src/screens/FlightsScreen.tsx
+  s_2d5a555e9490ea::t_a346a316aed153 23,26,29,31,47-57,63,68,70-72,78-83,239-245,277-284,288-290,293,298,302,312-318,320-335,337-349,351-354,356-361,393,410,412-416,419,449,483,485-486,492,494,502-514,521,523,527
+src/screens/MapScreen.web.tsx
+  s_2d5a555e9490ea::t_7c84b85c1c9e13 481
+  s_2d5a555e9490ea::t_834a1fd581e5e1 583-586,588-634,636-645
+  s_2d5a555e9490ea::t_fd8cb3ed312854 524-544
+  s_2d5a555e9490ea::t_000e98a31f0165 784,792-797,803
+  s_2d5a555e9490ea::t_b1d138320f9475 22
+  s_2d5a555e9490ea::t_311e3e6ccefcd0 454-462
+  s_2d5a555e9490ea::t_0655bc3c0d9e1b 693-696
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "7b4f3fde88eb3d2a284d58e4ee5684ae0756062e",
+  "prompts": {},
+  "sessions": {
+    "s_2d5a555e9490ea": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_18c1b879effektk8XWzjCyFHK5",
+        "model": "claude-opus-4.7"
+      },
+      "human_author": "jirkacha <jirkacha@gmail.com>"
+    }
+  }
+}
