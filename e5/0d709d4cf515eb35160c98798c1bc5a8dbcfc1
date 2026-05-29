@@ -1,0 +1,25 @@
+src/opensky.ts
+  s_2d5a555e9490ea::t_704dcdb4fc5cc6 28-32
+src/utils.ts
+  s_2d5a555e9490ea::t_9d90ff27de13d1 60-67
+src/screens/FlightsScreen.tsx
+  s_2d5a555e9490ea::t_d6a0ce4f9a2688 14,19,23,25,34,38,58,93,132-135,140,150,152-156,160,165,191,198,214,216-221,232-234,236-237,248,251-257,260,266,270,276-287,289-308,311-315,317-318,320-325,327-337,339-340,345-360,362-363,366-391,393-404,411,416-424,429-430,432,436,438,445-469,471-503,508,510-511
+src/screens/MapScreen.web.tsx
+  s_2d5a555e9490ea::t_163a84c9025cff 17,22,25,38,83,87-88,99,102,105,110,112,116,120,125,129-130,132-133,139,165-453,494,523-527,552,564,617-624
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "e50d709d4cf515eb35160c98798c1bc5a8dbcfc1",
+  "prompts": {},
+  "sessions": {
+    "s_2d5a555e9490ea": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_18c1b879effektk8XWzjCyFHK5",
+        "model": "claude-opus-4.7"
+      },
+      "human_author": "jirkacha <jirkacha@gmail.com>"
+    }
+  }
+}
