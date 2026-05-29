@@ -1,6 +1,15 @@
 import React, { useEffect, useState, useMemo } from "react"
 import { View, Text, ActivityIndicator, StyleSheet, useColorScheme } from "react-native"
-import { MapContainer, TileLayer, Marker, Popup, CircleMarker, Polyline, useMap } from "react-leaflet"
+import {
+  MapContainer,
+  TileLayer,
+  Marker,
+  Popup,
+  Tooltip,
+  CircleMarker,
+  Polyline,
+  useMap,
+} from "react-leaflet"
 import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native"
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack"
 import L from "leaflet"
@@ -22,16 +31,13 @@ const PLANE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" w
     d="M16 1.5 l1.6 9.4 12.4 6.2 v2.6 l-12.4 -3.7 -1 7.4 4.3 2.6 v2 l-5.0 -1.4 -5.0 1.4 v-2 l4.3 -2.6 -1 -7.4 -12.4 3.7 v-2.6 l12.4 -6.2 z"/>
 </svg>`
 
-const planeIcon = (heading = 0, color = "#666", label?: string, selected = false) => {
-  const size = selected ? 36 : 26
+const planeIcon = (heading = 0, color = "#666", selected = false) => {
+  const size = selected ? 36 : 24
   return L.divIcon({
     className: "plane-marker",
     html: `
-      <div style="display:flex; flex-direction:column; align-items:center; transform: translate(-50%, -50%); pointer-events:auto;">
-        <div style="width:${size}px; height:${size}px; transform: rotate(${heading}deg); color:${color}; filter: drop-shadow(0 1px 1.5px rgba(0,0,0,0.5));">
-          ${PLANE_SVG}
-        </div>
-        ${label ? `<div style="background:rgba(15,23,42,0.85); color:#fff; font-size:11px; padding:2px 6px; border-radius:4px; margin-top:3px; white-space:nowrap; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-weight:600; box-shadow:0 1px 3px rgba(0,0,0,0.3); letter-spacing:0.3px;">${label}</div>` : ""}
+      <div style="width:${size}px; height:${size}px; transform: translate(-50%, -50%) rotate(${heading}deg); color:${color}; filter: drop-shadow(0 1px 1.5px rgba(0,0,0,0.55));">
+        ${PLANE_SVG}
       </div>
     `,
     iconSize: [0, 0],
@@ -46,6 +52,13 @@ type Matched = {
 
 const MapController: React.FC<{ target: [number, number] | null }> = ({ target }) => {
   const map = useMap()
+  // Leaflet sometimes mounts with zero size when its container is inside a
+  // flex layout — force a recompute shortly after mount so it actually
+  // centers on PRG instead of drifting into the ocean.
+  useEffect(() => {
+    const id = window.setTimeout(() => map.invalidateSize(), 200)
+    return () => window.clearTimeout(id)
+  }, [map])
   useEffect(() => {
     if (target) map.flyTo(target, Math.max(map.getZoom(), 8), { duration: 0.8 })
   }, [target, map])
@@ -95,7 +108,8 @@ export const MapScreen: React.FC = () => {
     }
     loadAircraft()
     loadFlights()
-    const id = setInterval(loadAircraft, 30_000)
+    // Refresh aircraft positions ~every second so movement is visible.
+    const id = setInterval(loadAircraft, 1_000)
     return () => {
       cancelled = true
       clearInterval(id)
@@ -192,21 +206,33 @@ export const MapScreen: React.FC = () => {
                 ? t.success
                 : t.accent
               : t.textMuted
-            const label = f ? f.number : a.callsign
             const selected = selectedIcao === a.icao24
             const counterCoords = f ? getAirportCoords(f.counterpart.iata) : null
+            // Compact summary shown on hover.
+            const hoverTitle = f?.number ?? a.callsign ?? a.icao24
+            const hoverRoute = f
+              ? f.direction === "arrival"
+                ? `${f.counterpart.iata ?? f.counterpart.name} → PRG`
+                : `PRG → ${f.counterpart.iata ?? f.counterpart.name}`
+              : a.callsign
+                ? "Tranzit"
+                : ""
+            const hoverMeta = [
+              !a.onGround && a.altitudeFt != null ? `${Math.round(a.altitudeFt).toLocaleString()} ft` : null,
+              a.groundSpeedKt != null ? `${Math.round(a.groundSpeedKt)} kt` : null,
+            ]
+              .filter(Boolean)
+              .join(" · ")
             return (
               <React.Fragment key={a.icao24}>
                 {selected && counterCoords && f && (
                   <>
-                    {/* Completed segment: solid line from origin to current position (or PRG to current for departures) */}
                     {f.direction === "arrival" ? (
                       <>
                         <Polyline
                           positions={[counterCoords, [a.latitude, a.longitude]]}
                           pathOptions={{ color, weight: 3, opacity: 0.9 }}
                         />
-                        {/* Remaining: dashed line to PRG */}
                         <Polyline
                           positions={[[a.latitude, a.longitude], PRG_COORDS]}
                           pathOptions={{ color, weight: 3, opacity: 0.6, dashArray: "8 8" }}
@@ -224,7 +250,6 @@ export const MapScreen: React.FC = () => {
                         />
                       </>
                     )}
-                    {/* Counterpart airport marker */}
                     <CircleMarker
                       center={counterCoords}
                       radius={8}
@@ -243,36 +268,82 @@ export const MapScreen: React.FC = () => {
                 )}
                 <Marker
                   position={[a.latitude, a.longitude]}
-                  icon={planeIcon(a.headingDeg, color, label, selected)}
+                  icon={planeIcon(a.headingDeg, color, selected)}
                   eventHandlers={{
-                    click: () => setSelectedIcao(a.icao24),
-                    popupclose: () => setSelectedIcao((prev) => (prev === a.icao24 ? null : prev)),
+                    click: () =>
+                      setSelectedIcao((prev) => (prev === a.icao24 ? null : a.icao24)),
                   }}
                 >
-                <Popup>
-                  <div style={{ minWidth: 200 }}>
-                    <strong style={{ fontSize: 14 }}>
-                      {f?.number ?? a.callsign ?? a.icao24}
-                    </strong>
-                    {f && (
-                      <>
-                        <br />
-                        <span style={{ color: "#666" }}>{f.airlineName}</span>
-                        <br />
-                        <strong>
-                          {f.direction === "arrival"
-                            ? `${f.counterpart.city ?? f.counterpart.name} → Praha`
-                            : `Praha → ${f.counterpart.city ?? f.counterpart.name}`}
-                        </strong>
-                        <br />
-                        {f.direction === "arrival" ? "Přistává:" : "Vzlétl:"}{" "}
-                        <strong>{fmtTime(f.actualTime ?? f.scheduledTime)}</strong>
-                        {f.direction === "arrival" && (
-                          <>
-                            {" "}
-                            ({(() => {
-                              const m = minutesUntil(f.actualTime ?? f.scheduledTime)
-                              return m >= 0 ? `za ${m} min` : `před ${-m} min`
+                  <Tooltip
+                    direction="top"
+                    offset={[0, -16]}
+                    opacity={0.96}
+                    sticky
+                    className="plane-tooltip"
+                  >
+                    <div style={{ minWidth: 140, lineHeight: 1.35 }}>
+                      <div style={{ fontWeight: 700, fontSize: 13, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>
+                        {hoverTitle}
+                      </div>
+                      {f && (
+                        <div style={{ color: "#94a3b8", fontSize: 11 }}>{f.airlineName}</div>
+                      )}
+                      {hoverRoute && (
+                        <div style={{ fontWeight: 600, fontSize: 12, marginTop: 2 }}>
+                          {hoverRoute}
+                        </div>
+                      )}
+                      {f && (
+                        <div style={{ fontSize: 11, color: "#cbd5e1", marginTop: 2 }}>
+                          {f.direction === "arrival" ? "Přistává " : "Odlétá "}
+                          <strong>{fmtTime(f.actualTime ?? f.scheduledTime)}</strong>
+                          {(() => {
+                            const m = minutesUntil(f.actualTime ?? f.scheduledTime)
+                            return m >= 0 ? ` (za ${m} min)` : ` (před ${-m} min)`
+                          })()}
+                        </div>
+                      )}
+                      {hoverMeta && (
+                        <div
+                          style={{
+                            fontSize: 11,
+                            color: "#cbd5e1",
+                            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                            marginTop: 2,
+                          }}
+                        >
+                          {hoverMeta}
+                        </div>
+                      )}
+                      <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 4 }}>
+                        {selected ? "Kliknutím skryješ trasu" : "Klikni pro trasu letu"}
+                      </div>
+                    </div>
+                  </Tooltip>
+                  <Popup autoClose={false} closeOnClick={false}>
+                    <div style={{ minWidth: 200 }}>
+                      <strong style={{ fontSize: 14 }}>
+                        {f?.number ?? a.callsign ?? a.icao24}
+                      </strong>
+                      {f && (
+                        <>
+                          <br />
+                          <span style={{ color: "#666" }}>{f.airlineName}</span>
+                          <br />
+                          <strong>
+                            {f.direction === "arrival"
+                              ? `${f.counterpart.city ?? f.counterpart.name} → Praha`
+                              : `Praha → ${f.counterpart.city ?? f.counterpart.name}`}
+                          </strong>
+                          <br />
+                          {f.direction === "arrival" ? "Přistává:" : "Vzlétl:"}{" "}
+                          <strong>{fmtTime(f.actualTime ?? f.scheduledTime)}</strong>
+                          {f.direction === "arrival" && (
+                            <>
+                              {" "}
+                              ({(() => {
+                                const m = minutesUntil(f.actualTime ?? f.scheduledTime)
+                                return m >= 0 ? `za ${m} min` : `před ${-m} min`
                             })()})
                           </>
                         )}

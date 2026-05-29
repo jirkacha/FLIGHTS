@@ -15,7 +15,7 @@ export type Theme = {
 }
 
 const MONO = Platform.select({
-  web: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace',
+  web: '"SF Mono", "JetBrains Mono", "Fira Code", "Roboto Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
   default: "Menlo",
 }) as string
 

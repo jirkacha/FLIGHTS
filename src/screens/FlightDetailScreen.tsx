@@ -204,18 +204,21 @@ export const FlightDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         <DetailRow label="Gate" value={flight.gate ?? "—"} t={t} last />
       </View>
 
-      <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border, overflow: "hidden" }]}>
+      <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border }]}>
         <Text style={[styles.sectionTitle, { color: t.textMuted }]}>LETADLO</Text>
         {photo?.large ? (
-          <Pressable onPress={() => photo.link && Linking.openURL(photo.link)}>
+          <Pressable
+            onPress={() => photo.link && Linking.openURL(photo.link)}
+            style={styles.photoWrap}
+          >
             <Image
               source={{ uri: photo.large }}
-              style={styles.aircraftPhoto}
+              style={[styles.aircraftPhoto, { backgroundColor: t.cardTint, borderColor: t.border }]}
               resizeMode="cover"
             />
             {photo.photographer && (
               <Text style={[styles.photoCredit, { color: t.textMuted }]}>
-                © {photo.photographer} (Planespotters.net)
+                © {photo.photographer} · Planespotters.net
               </Text>
             )}
           </Pressable>
@@ -274,16 +277,18 @@ const styles = StyleSheet.create({
   liveTitle: { fontSize: 13, fontWeight: "700", letterSpacing: 0.5 },
   linkText: { fontSize: 13, fontWeight: "600" },
   aircraftPhoto: {
-    alignSelf: "stretch",
-    height: 180,
-    marginHorizontal: -14,
-    marginTop: -8,
-    marginBottom: 8,
-    backgroundColor: "rgba(127,127,127,0.1)",
+    width: 260,
+    height: 175,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  photoWrap: {
+    alignItems: "center",
+    paddingTop: 4,
+    paddingBottom: 10,
+    gap: 4,
   },
   photoCredit: {
     fontSize: 10,
-    paddingBottom: 8,
-    textAlign: "right",
   },
 })
