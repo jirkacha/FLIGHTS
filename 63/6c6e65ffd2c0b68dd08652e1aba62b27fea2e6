@@ -1,0 +1,22 @@
+src/screens/MapScreen.web.tsx
+  s_d4466cc27ae1bf::t_10c2d4b3084639 438-449
+  s_d4466cc27ae1bf::t_e5053d45a45174 63-234
+  s_d4466cc27ae1bf::t_d17931ff9929a4 34-35,37-42,44,47,54-55
+  s_d4466cc27ae1bf::t_18a098ccf15d81 293-296
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "636c6e65ffd2c0b68dd08652e1aba62b27fea2e6",
+  "prompts": {},
+  "sessions": {
+    "s_d4466cc27ae1bf": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_18cdf5031ffeVQFKA1g4CLBe23",
+        "model": "claude-opus-4.7"
+      },
+      "human_author": "jirkacha <jirkacha@gmail.com>"
+    }
+  }
+}
