@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from "react"
 import { View, Text, ActivityIndicator, StyleSheet, useColorScheme } from "react-native"
-import { MapContainer, TileLayer, Marker, Popup, CircleMarker } from "react-leaflet"
+import { MapContainer, TileLayer, Marker, Popup, CircleMarker, Polyline } from "react-leaflet"
 import { useNavigation } from "@react-navigation/native"
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack"
 import L from "leaflet"
@@ -9,6 +9,7 @@ import { useTheme } from "../theme"
 import { fetchLiveAircraft, type LiveAircraft } from "../opensky"
 import { fetchAllFlights } from "../api"
 import { buildMatchMap } from "../matchFlights"
+import { getAirportCoords } from "../airports"
 import type { Flight } from "../types"
 import type { RootStackParamList } from "../navigation"
 
@@ -16,18 +17,20 @@ const PRG_COORDS: [number, number] = [50.1008, 14.26]
 
 type Nav = NativeStackNavigationProp<RootStackParamList, "Map">
 
-const planeIcon = (heading = 0, color = "#666", label?: string) =>
-  L.divIcon({
+const planeIcon = (heading = 0, color = "#666", label?: string, selected = false) => {
+  const size = selected ? 40 : 32
+  return L.divIcon({
     className: "plane-marker",
     html: `
-      <div style="display:flex; flex-direction:column; align-items:center; transform: translate(-50%, -50%);">
-        <div style="transform: rotate(${heading - 45}deg); color: ${color}; font-size: 20px; line-height: 20px; text-shadow: 0 0 3px rgba(0,0,0,0.4);">✈</div>
-        ${label ? `<div style="background:rgba(0,0,0,0.65); color:#fff; font-size:9px; padding:1px 4px; border-radius:3px; margin-top:2px; white-space:nowrap; font-family:system-ui;">${label}</div>` : ""}
+      <div style="display:flex; flex-direction:column; align-items:center; transform: translate(-50%, -50%); pointer-events:auto;">
+        <div style="transform: rotate(${heading - 45}deg); color: ${color}; font-size: ${size}px; line-height: ${size}px; text-shadow: 0 0 4px rgba(0,0,0,0.6), 0 0 2px rgba(255,255,255,0.8); filter: drop-shadow(0 1px 2px rgba(0,0,0,0.3));">✈</div>
+        ${label ? `<div style="background:rgba(15,23,42,0.85); color:#fff; font-size:11px; padding:2px 6px; border-radius:4px; margin-top:3px; white-space:nowrap; font-family:system-ui,-apple-system,sans-serif; font-weight:600; box-shadow:0 1px 3px rgba(0,0,0,0.3);">${label}</div>` : ""}
       </div>
     `,
     iconSize: [0, 0],
     iconAnchor: [0, 0],
   })
+}
 
 const fmtTime = (iso?: string) => {
   if (!iso) return "—"
@@ -73,6 +76,7 @@ export const MapScreen: React.FC = () => {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
+  const [selectedIcao, setSelectedIcao] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -172,21 +176,62 @@ export const MapScreen: React.FC = () => {
                 : t.accent
               : t.textMuted
             const label = f ? f.number : a.callsign
+            const selected = selectedIcao === a.icao24
+            const counterCoords = f ? getAirportCoords(f.counterpart.iata) : null
             return (
-              <Marker
-                key={a.icao24}
-                position={[a.latitude, a.longitude]}
-                icon={planeIcon(a.headingDeg, color, label)}
-                eventHandlers={
-                  f
-                    ? {
-                        click: () => {
-                          // popup still opens; tap on popup link to navigate
-                        },
-                      }
-                    : undefined
-                }
-              >
+              <React.Fragment key={a.icao24}>
+                {selected && counterCoords && f && (
+                  <>
+                    {/* Completed segment: solid line from origin to current position (or PRG to current for departures) */}
+                    {f.direction === "arrival" ? (
+                      <>
+                        <Polyline
+                          positions={[counterCoords, [a.latitude, a.longitude]]}
+                          pathOptions={{ color, weight: 3, opacity: 0.9 }}
+                        />
+                        {/* Remaining: dashed line to PRG */}
+                        <Polyline
+                          positions={[[a.latitude, a.longitude], PRG_COORDS]}
+                          pathOptions={{ color, weight: 3, opacity: 0.6, dashArray: "8 8" }}
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <Polyline
+                          positions={[PRG_COORDS, [a.latitude, a.longitude]]}
+                          pathOptions={{ color, weight: 3, opacity: 0.9 }}
+                        />
+                        <Polyline
+                          positions={[[a.latitude, a.longitude], counterCoords]}
+                          pathOptions={{ color, weight: 3, opacity: 0.6, dashArray: "8 8" }}
+                        />
+                      </>
+                    )}
+                    {/* Counterpart airport marker */}
+                    <CircleMarker
+                      center={counterCoords}
+                      radius={8}
+                      pathOptions={{ color, fillColor: color, fillOpacity: 0.7 }}
+                    >
+                      <Popup>
+                        <strong>
+                          {f.counterpart.city ?? f.counterpart.name}
+                          {f.counterpart.iata ? ` (${f.counterpart.iata})` : ""}
+                        </strong>
+                        <br />
+                        {f.counterpart.name}
+                      </Popup>
+                    </CircleMarker>
+                  </>
+                )}
+                <Marker
+                  position={[a.latitude, a.longitude]}
+                  icon={planeIcon(a.headingDeg, color, label, selected)}
+                  eventHandlers={{
+                    click: () => setSelectedIcao(a.icao24),
+                    popupclose: () => setSelectedIcao((prev) => (prev === a.icao24 ? null : prev)),
+                  }}
+                >
                 <Popup>
                   <div style={{ minWidth: 200 }}>
                     <strong style={{ fontSize: 14 }}>
@@ -271,7 +316,8 @@ export const MapScreen: React.FC = () => {
                     )}
                   </div>
                 </Popup>
-              </Marker>
+                </Marker>
+              </React.Fragment>
             )
           })}
         </MapContainer>
