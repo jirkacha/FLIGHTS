@@ -61,18 +61,19 @@ export const FlightDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     }
   }, [flight])
 
-  // Fetch aircraft photo by registration (prefers live ADS-B reg if known).
+  // Fetch aircraft photo by registration (with ICAO24 hex fallback).
   useEffect(() => {
     let cancelled = false
     const reg = live?.registration ?? flight.aircraftReg
-    if (!reg) return
-    fetchAircraftPhoto(reg).then((p) => {
+    const hex = live?.icao24
+    if (!reg && !hex) return
+    fetchAircraftPhoto(reg, hex).then((p) => {
       if (!cancelled) setPhoto(p)
     })
     return () => {
       cancelled = true
     }
-  }, [live?.registration, flight.aircraftReg])
+  }, [live?.registration, live?.icao24, flight.aircraftReg])
 
   const delayMin =
     flight.actualTime && flight.scheduledTime

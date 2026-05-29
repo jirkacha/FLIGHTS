@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from "react"
-import { View, Text, ActivityIndicator, StyleSheet, useColorScheme } from "react-native"
+import { View, Text, ActivityIndicator, StyleSheet, useColorScheme, Pressable } from "react-native"
 import {
   MapContainer,
   TileLayer,
@@ -263,6 +263,8 @@ export const MapScreen: React.FC = () => {
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
   const [selectedIcao, setSelectedIcao] = useState<string | null>(null)
   const [flyTarget, setFlyTarget] = useState<[number, number] | null>(null)
+  const [satellite, setSatellite] = useState(false)
+  const [showRadar, setShowRadar] = useState(true)
 
   useEffect(() => {
     let cancelled = false
@@ -309,30 +311,43 @@ export const MapScreen: React.FC = () => {
   const matchedCount = useMemo(() => matched.filter((m) => m.flight).length, [matched])
 
   // Auto-focus a flight passed via route params (e.g. tapping 🗺️ from the list).
+  // If the flight isn't in ADS-B (out of range / on ground at a distant airport),
+  // we DON'T pan to the counterpart airport — that's the bug the user reported.
+  // We just stay at PRG and let them know the plane isn't visible.
   useEffect(() => {
     if (!focusFlightId) return
     const hit = matched.find((m) => m.flight?.id === focusFlightId)
     if (hit) {
       setSelectedIcao(hit.aircraft.icao24)
       setFlyTarget([hit.aircraft.latitude, hit.aircraft.longitude])
-      return
     }
-    // Not airborne — fall back to the counterpart airport so the user sees something.
-    const all = [...flights.arrivals, ...flights.departures]
-    const f = all.find((x) => x.id === focusFlightId)
-    const c = f ? getAirportCoords(f.counterpart.iata) : null
-    if (c) setFlyTarget(c)
-  }, [focusFlightId, matched, flights])
+  }, [focusFlightId, matched])
 
-  const tileUrl =
-    scheme === "dark"
-      ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-      : "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+  const tileConfig = useMemo(() => {
+    if (satellite) {
+      return {
+        url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        attribution:
+          'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community',
+        labelsUrl:
+          "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+      }
+    }
+    return {
+      url:
+        scheme === "dark"
+          ? "https://{s}.basemaps.cartocdn.com/rastertiles/voyager_labels_under/{z}/{x}/{y}{r}.png"
+          : "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+      attribution:
+        '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+      labelsUrl: null,
+    }
+  }, [satellite, scheme])
 
   return (
     <View style={[styles.container, { backgroundColor: t.bg }]}>
       <View style={[styles.statusBar, { backgroundColor: t.card, borderColor: t.border }]}>
-        <View>
+        <View style={{ flex: 1 }}>
           <Text style={[styles.statusText, { color: t.text }]}>
             ✈️ {aircraft.length} letadel{matchedCount > 0 && ` · ${matchedCount} spárováno`}
           </Text>
@@ -346,11 +361,47 @@ export const MapScreen: React.FC = () => {
               })}
             </Text>
           )}
+          {focusFlightId && !matched.some((m) => m.flight?.id === focusFlightId) && (
+            <Text style={[styles.statusSub, { color: t.warning }]}>
+              Vybraný let není v ADS-B dosahu — zobrazena Praha
+            </Text>
+          )}
         </View>
         <View style={styles.legend}>
-          <LegendDot color={t.success} label="Přílet" />
-          <LegendDot color={t.accent} label="Odlet" />
-          <LegendDot color={t.textMuted} label="Tranzit" />
+          <LegendDot color={t.success} label="Přílet PRG" />
+          <LegendDot color={t.accent} label="Odlet PRG" />
+          <LegendDot color={t.warning} label="Tranzit" />
+          <LegendDot color={t.textMuted} label="Na zemi" />
+        </View>
+        <View style={styles.controls}>
+          <Pressable
+            onPress={() => setShowRadar((v) => !v)}
+            style={[
+              styles.toggleBtn,
+              {
+                borderColor: t.border,
+                backgroundColor: showRadar ? t.accent : t.cardTint,
+              },
+            ]}
+          >
+            <Text style={[styles.toggleBtnText, { color: showRadar ? "#fff" : t.text }]}>
+              📡 Radar
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setSatellite((v) => !v)}
+            style={[
+              styles.toggleBtn,
+              {
+                borderColor: t.border,
+                backgroundColor: satellite ? t.accent : t.cardTint,
+              },
+            ]}
+          >
+            <Text style={[styles.toggleBtnText, { color: satellite ? "#fff" : t.text }]}>
+              🛰 Satelit
+            </Text>
+          </Pressable>
         </View>
         {error && <Text style={[styles.statusSub, { color: t.danger }]}>Chyba: {error}</Text>}
       </View>
@@ -368,10 +419,15 @@ export const MapScreen: React.FC = () => {
           scrollWheelZoom
         >
           <MapController target={flyTarget} />
-          <TileLayer
-            url={tileUrl}
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
-          />
+          <TileLayer key={tileConfig.url} url={tileConfig.url} attribution={tileConfig.attribution} />
+          {tileConfig.labelsUrl && (
+            <TileLayer
+              key={`labels-${tileConfig.labelsUrl}`}
+              url={tileConfig.labelsUrl}
+              attribution=""
+              opacity={0.85}
+            />
+          )}
           <CircleMarker
             center={PRG_COORDS}
             radius={10}
@@ -385,15 +441,32 @@ export const MapScreen: React.FC = () => {
           </CircleMarker>
           {matched.map(({ aircraft: a, flight: f }) => {
             const distKm = haversineKm(PRG_COORDS[0], PRG_COORDS[1], a.latitude, a.longitude)
-            const color = f
-              ? f.direction === "arrival"
-                ? t.success
-                : t.accent
-              : t.textMuted
+            // Color encodes state at a glance:
+            //   green = arrival to PRG, blue = departure from PRG,
+            //   yellow = airborne transit, gray = on ground.
+            const color = a.onGround
+              ? t.textMuted
+              : f
+                ? f.direction === "arrival"
+                  ? t.success
+                  : t.accent
+                : t.warning
             const selected = selectedIcao === a.icao24
             const counterCoords = f ? getAirportCoords(f.counterpart.iata) : null
             return (
               <React.Fragment key={a.icao24}>
+                {/* Radar-style PRG connection line for matched airborne flights. */}
+                {showRadar && f && !a.onGround && !selected && (
+                  <Polyline
+                    positions={[[a.latitude, a.longitude], PRG_COORDS]}
+                    pathOptions={{
+                      color,
+                      weight: 1,
+                      opacity: 0.35,
+                      dashArray: "3 6",
+                    }}
+                  />
+                )}
                 {selected && counterCoords && f && (
                   <>
                     {f.direction === "arrival" ? (
@@ -477,10 +550,18 @@ const styles = StyleSheet.create({
   },
   statusText: { fontSize: 13, fontWeight: "600" },
   statusSub: { fontSize: 11 },
-  legend: { flexDirection: "row", gap: 12 },
+  legend: { flexDirection: "row", gap: 12, flexWrap: "wrap" },
   legendItem: { flexDirection: "row", alignItems: "center", gap: 4 },
   legendDot: { width: 10, height: 10, borderRadius: 5 },
   legendLabel: { fontSize: 11 },
+  controls: { flexDirection: "row", gap: 6 },
+  toggleBtn: {
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  toggleBtnText: { fontSize: 12, fontWeight: "600" },
   overlay: {
     position: "absolute",
     top: 0,

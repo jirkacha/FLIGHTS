@@ -28,9 +28,25 @@ const useWebFontSetup = () => {
   useEffect(() => {
     if (Platform.OS !== "web") return
     if (typeof document === "undefined") return
+    // Load Inter + JetBrains Mono from Google Fonts so the font stack actually
+    // resolves to the intended family on machines that don't have them installed.
+    const preconnect1 = document.createElement("link")
+    preconnect1.rel = "preconnect"
+    preconnect1.href = "https://fonts.googleapis.com"
+    const preconnect2 = document.createElement("link")
+    preconnect2.rel = "preconnect"
+    preconnect2.href = "https://fonts.gstatic.com"
+    preconnect2.crossOrigin = "anonymous"
+    const fontLink = document.createElement("link")
+    fontLink.rel = "stylesheet"
+    fontLink.href =
+      "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
+    document.head.appendChild(preconnect1)
+    document.head.appendChild(preconnect2)
+    document.head.appendChild(fontLink)
+
     document.documentElement.style.fontFamily = WEB_FONT_STACK
     document.body.style.fontFamily = WEB_FONT_STACK
-    // Crisp text on retina + better letter spacing for UI font.
     const style = document.createElement("style")
     style.textContent = `
       html, body, #root { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: optimizeLegibility; }
@@ -39,6 +55,9 @@ const useWebFontSetup = () => {
     `
     document.head.appendChild(style)
     return () => {
+      preconnect1.remove()
+      preconnect2.remove()
+      fontLink.remove()
       style.remove()
     }
   }, [])

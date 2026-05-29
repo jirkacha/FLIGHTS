@@ -78,10 +78,11 @@ const fetchAll = async (): Promise<CacheEntry> => {
     }
   }
   const now = new Date()
-  // AeroDataBox allows max 12h window. Bias toward the past so long-delayed
-  // inbound flights (whose scheduled time is hours ago) still come back.
-  const from = fmt(new Date(now.getTime() - 8 * 3600 * 1000))
-  const to = fmt(new Date(now.getTime() + 4 * 3600 * 1000))
+  // AeroDataBox allows max 12h window. Bias toward the future so upcoming
+  // arrivals are visible far in advance, while still keeping a -4h tail
+  // so long-delayed inbound flights don't disappear.
+  const from = fmt(new Date(now.getTime() - 4 * 3600 * 1000))
+  const to = fmt(new Date(now.getTime() + 8 * 3600 * 1000))
   const url = `https://${HOST}/flights/airports/iata/${AIRPORT_IATA}/${from}/${to}?direction=Both&withCancelled=true&withCodeshared=false&withCargo=true&withPrivate=false&withLocation=false`
   const res = await fetch(url, {
     headers: { "X-RapidAPI-Key": RAPIDAPI_KEY, "X-RapidAPI-Host": HOST },
