@@ -1,0 +1,35 @@
+{
+  "expo": {
+    "name": "PRG Flights",
+    "slug": "prg-flights",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro",
+      "name": "PRG Flights",
+      "shortName": "PRG",
+      "lang": "cs",
+      "scope": "/",
+      "themeColor": "#0066cc",
+      "backgroundColor": "#0b1220",
+      "display": "standalone",
+      "orientation": "portrait",
+      "description": "Přílety a odlety z Letiště Václava Havla Praha"
+    }
+  }
+}
