@@ -127,19 +127,22 @@ export const FlightsScreen: React.FC<Props> = ({ navigation }) => {
       else setLoading(true)
       setError(null)
       try {
-        const [{ flights, isMock }, liveRes] = await Promise.all([
-          fetchFlights(direction),
-          fetchLiveAircraft().catch(() => [] as LiveAircraft[]),
-        ])
+        // Fetch flights eagerly — the screen is usable without live ADS-B.
+        const { flights, isMock } = await fetchFlights(direction)
         setFlights(flights)
         setIsMock(isMock)
-        setLive(liveRes)
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e))
       } finally {
         setLoading(false)
         setRefreshing(false)
       }
+      // Best-effort live aircraft enrichment — never blocks the list render.
+      fetchLiveAircraft()
+        .then(setLive)
+        .catch(() => {
+          /* live data is optional — progress bars fall back to time-based */
+        })
     },
     [direction],
   )

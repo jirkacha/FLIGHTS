@@ -67,13 +67,15 @@ const mapAircraft = (a: RawAircraft): LiveAircraft | null => {
   }
 }
 
-const tryFetch = async (url: string): Promise<LiveAircraft[]> => {
-  const res = await fetch(url)
+const tryFetch = async (url: string, signal: AbortSignal): Promise<LiveAircraft[]> => {
+  const res = await fetch(url, { signal })
   if (!res.ok) throw new Error(`${url} → HTTP ${res.status}`)
   const json = (await res.json()) as { ac?: RawAircraft[]; aircraft?: RawAircraft[] }
   const list = json.ac ?? json.aircraft ?? []
   return list.map(mapAircraft).filter((x): x is LiveAircraft => x !== null)
 }
+
+const PER_SOURCE_TIMEOUT_MS = 5000
 
 export const fetchLiveAircraft = async (): Promise<LiveAircraft[]> => {
   const sources = [
@@ -82,11 +84,15 @@ export const fetchLiveAircraft = async (): Promise<LiveAircraft[]> => {
   ]
   let lastErr: unknown
   for (const url of sources) {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), PER_SOURCE_TIMEOUT_MS)
     try {
-      return await tryFetch(url)
+      return await tryFetch(url, controller.signal)
     } catch (e) {
       lastErr = e
+    } finally {
+      clearTimeout(timer)
     }
   }
-  throw lastErr instanceof Error ? lastErr : new Error("All ADS-B sources failed")
+  throw lastErr instanceof Error ? lastErr : new Error("All ADS-B sources failed or timed out")
 }
