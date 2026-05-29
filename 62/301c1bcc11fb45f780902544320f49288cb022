@@ -1,0 +1,33 @@
+src/matchFlights.ts
+  s_365bf8e872cd9a::t_1cc545011ceb76 1-54
+src/screens/FlightsScreen.tsx
+  s_365bf8e872cd9a::t_809099d30c9d86 17
+  s_365bf8e872cd9a::t_142134c2e32551 330-333
+  s_365bf8e872cd9a::t_59b8b9c8b4d3bc 251-256,262-267
+src/types.ts
+  s_365bf8e872cd9a::t_d137192f1cf8e8 18
+src/screens/MapScreen.web.tsx
+  s_365bf8e872cd9a::t_800c4df48adccd 1,4-5,10-13,17-19,22-29,32-63,67,69-72,81-86,101-108,117-119,121-136,167-276,283-289,299-300,304-307
+src/api.ts
+  s_365bf8e872cd9a::t_71c3fbe4744b9d 7,28,48,66-70,73-75,80-81,84,86,88-131
+src/components.tsx
+  s_365bf8e872cd9a::t_d9b460a9692213 2,8,48-77,88-89
+src/screens/FlightDetailScreen.tsx
+  s_365bf8e872cd9a::t_965c2ebe684e26 1-2,6-8,26-40,43-64,73,78-83,86-108,111-117,119-180,186-203,207-224,227-230
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "62301c1bcc11fb45f780902544320f49288cb022",
+  "prompts": {},
+  "sessions": {
+    "s_365bf8e872cd9a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_190aa0706ffeJkcj653C1rtvIk",
+        "model": "claude-opus-4.7"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
