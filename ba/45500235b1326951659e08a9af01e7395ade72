@@ -1,0 +1,51 @@
+src/types.ts
+  s_365bf8e872cd9a::t_fe4e672fe7e4c4 1-33
+src/components.tsx
+  s_365bf8e872cd9a::t_638e5e31f08acc 3-4
+  s_365bf8e872cd9a::t_21abbe2afcf027 1-2,5-59
+vercel.json
+  s_365bf8e872cd9a::t_6bef2542d67d7f 1-7
+src/api.ts
+  s_365bf8e872cd9a::t_a15028da1b7022 100
+  s_365bf8e872cd9a::t_d61036db2982b9 1-99,101-116
+src/mockData.ts
+  s_365bf8e872cd9a::t_515bd6cd563ee4 1-109
+.env.example
+  s_365bf8e872cd9a::t_f141cc85a415ca 1
+.gitignore
+  s_365bf8e872cd9a::t_a851eb6ee1521c 34
+package.json
+  s_365bf8e872cd9a::t_523bc02f905916 1-29
+App.tsx
+  s_365bf8e872cd9a::t_2b1c9a9fe67f69 1-31
+src/screens/FlightsScreen.tsx
+  s_365bf8e872cd9a::t_9dd0a7c1f67c72 1-228
+README.md
+  s_365bf8e872cd9a::t_af28bdbd62dab2 1-74
+src/navigation.ts
+  s_365bf8e872cd9a::t_b35b7cfa7795db 1-6
+src/screens/FlightDetailScreen.tsx
+  s_365bf8e872cd9a::t_9276a7955cc2eb 1-101
+src/theme.ts
+  s_365bf8e872cd9a::t_c393135990434f 1-50
+app.json
+  s_365bf8e872cd9a::t_9da54f7675643c 3,23-32
+  s_365bf8e872cd9a::t_e59e1743bf592a 22
+  s_365bf8e872cd9a::t_7e564ad1647475 8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "ba45500235b1326951659e08a9af01e7395ade72",
+  "prompts": {},
+  "sessions": {
+    "s_365bf8e872cd9a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_190aa0706ffeJkcj653C1rtvIk",
+        "model": "claude-opus-4.7"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
