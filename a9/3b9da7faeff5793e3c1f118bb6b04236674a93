@@ -1,0 +1,30 @@
+App.tsx
+  s_d4466cc27ae1bf::t_176220a551f99e 1,5,24-46,50
+src/screens/MapScreen.web.tsx
+  s_d4466cc27ae1bf::t_3bb1fe83e84b1a 34-35,39-40
+  s_d4466cc27ae1bf::t_b27c4792fb4964 111-112
+  s_d4466cc27ae1bf::t_3fc3b3c8981e00 3-12
+  s_d4466cc27ae1bf::t_efa73b5e4bd8b3 55-61
+  s_d4466cc27ae1bf::t_fa6f8c03631c83 211-225,271,273-274,277-346
+src/screens/FlightDetailScreen.tsx
+  s_d4466cc27ae1bf::t_399a0b665b38b8 207,210-213,216,221
+  s_d4466cc27ae1bf::t_30a4b4fae881d9 280-289
+src/theme.ts
+  s_d4466cc27ae1bf::t_b0602899a673c0 18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "a93b9da7faeff5793e3c1f118bb6b04236674a93",
+  "prompts": {},
+  "sessions": {
+    "s_d4466cc27ae1bf": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_18cdf5031ffeVQFKA1g4CLBe23",
+        "model": "claude-opus-4.7"
+      },
+      "human_author": "jirkacha <jirkacha@gmail.com>"
+    }
+  }
+}
