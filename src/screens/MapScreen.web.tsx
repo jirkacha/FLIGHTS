@@ -19,7 +19,7 @@ import { fetchLiveAircraft, type LiveAircraft } from "../opensky"
 import { fetchAllFlights } from "../api"
 import { buildMatchMap } from "../matchFlights"
 import { getAirportCoords } from "../airports"
-import { AirlineLogo } from "../components"
+import { AirlineLogo, Chip } from "../components"
 import type { Flight } from "../types"
 import type { RootStackParamList } from "../navigation"
 import { haversineKm, minutesUntil, PRG_COORDS, fmtTime, fmtDateShort } from "../utils"
@@ -451,6 +451,15 @@ const panelStyles = StyleSheet.create({
 
 // --- Main screen -----------------------------------------------------------
 
+type AircraftFilter = "all" | "arrival" | "departure" | "other"
+
+const AIRCRAFT_FILTERS: { id: AircraftFilter; label: string }[] = [
+  { id: "all", label: "Vše" },
+  { id: "arrival", label: "🛬 Přílety" },
+  { id: "departure", label: "✈ Odlety" },
+  { id: "other", label: "Ostatní" },
+]
+
 export const MapScreen: React.FC = () => {
   const t = useTheme()
   const scheme = useColorScheme()
@@ -469,6 +478,7 @@ export const MapScreen: React.FC = () => {
   const [flyTarget, setFlyTarget] = useState<[number, number] | null>(null)
   const [satellite, setSatellite] = useState(false)
   const [showRadar, setShowRadar] = useState(true)
+  const [aircraftFilter, setAircraftFilter] = useState<AircraftFilter>("all")
 
   useEffect(() => {
     let cancelled = false
@@ -511,6 +521,27 @@ export const MapScreen: React.FC = () => {
 
   const matchedCount = useMemo(() => matched.filter((m) => m.flight).length, [matched])
 
+  /**
+   * Aircraft-level filter for what's drawn on the map. Buckets:
+   *   - arrival  : matched to an arriving PRG flight, airborne
+   *   - departure: matched to a departing PRG flight, airborne
+   *   - other    : transit (no flight match) OR on the ground regardless of match
+   *
+   * Counts feed the chip labels so the user knows how many planes a filter
+   * would surface before clicking it.
+   */
+  const bucketOf = (m: Matched): AircraftFilter => {
+    if (m.aircraft.onGround) return "other"
+    if (!m.flight) return "other"
+    return m.flight.direction === "arrival" ? "arrival" : "departure"
+  }
+
+  const filterCounts = useMemo(() => {
+    const c: Record<AircraftFilter, number> = { all: matched.length, arrival: 0, departure: 0, other: 0 }
+    for (const m of matched) c[bucketOf(m)]++
+    return c
+  }, [matched])
+
   useEffect(() => {
     if (!focusFlightId) return
     const hit = matched.find((m) => m.flight?.id === focusFlightId)
@@ -549,62 +580,69 @@ export const MapScreen: React.FC = () => {
   return (
     <View style={[styles.container, { backgroundColor: t.bg }]}>
       <View style={[styles.statusBar, { backgroundColor: t.card, borderColor: t.border }]}>
-        <View style={{ flex: 1, minWidth: 220 }}>
-          <Text style={[styles.statusText, { color: t.text }]}>
-            ✈️ {aircraft.length} letadel{matchedCount > 0 && ` · ${matchedCount} spárováno`}
-          </Text>
-          {lastUpdate && (
-            <Text style={[styles.statusSub, { color: t.textMuted }]}>
-              Aktualizováno{" "}
-              {lastUpdate.toLocaleTimeString([], {
-                hour: "2-digit",
-                minute: "2-digit",
-                second: "2-digit",
-              })}
-              {" · radius 250 NM"}
+        <View style={styles.statusTopRow}>
+          <View style={{ flex: 1, minWidth: 220 }}>
+            <Text style={[styles.statusText, { color: t.text }]}>
+              ✈️ {aircraft.length} letadel{matchedCount > 0 && ` · ${matchedCount} spárováno`}
             </Text>
-          )}
-          {focusFlightId && !matched.some((m) => m.flight?.id === focusFlightId) && (
-            <Text style={[styles.statusSub, { color: t.warning }]}>
-              Vybraný let není v ADS-B dosahu — zobrazena Praha
-            </Text>
-          )}
+            {lastUpdate && (
+              <Text style={[styles.statusSub, { color: t.textMuted }]}>
+                Aktualizováno{" "}
+                {lastUpdate.toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  second: "2-digit",
+                })}
+                {" · radius 250 NM"}
+              </Text>
+            )}
+            {focusFlightId && !matched.some((m) => m.flight?.id === focusFlightId) && (
+              <Text style={[styles.statusSub, { color: t.warning }]}>
+                Vybraný let není v ADS-B dosahu — zobrazena Praha
+              </Text>
+            )}
+          </View>
+          <View style={styles.controls}>
+            <Pressable
+              onPress={() => setShowRadar((v) => !v)}
+              style={[
+                styles.toggleBtn,
+                {
+                  borderColor: t.border,
+                  backgroundColor: showRadar ? t.accent : t.cardTint,
+                },
+              ]}
+            >
+              <Text style={[styles.toggleBtnText, { color: showRadar ? "#fff" : t.text }]}>
+                📡 Radar
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setSatellite((v) => !v)}
+              style={[
+                styles.toggleBtn,
+                {
+                  borderColor: t.border,
+                  backgroundColor: satellite ? t.accent : t.cardTint,
+                },
+              ]}
+            >
+              <Text style={[styles.toggleBtnText, { color: satellite ? "#fff" : t.text }]}>
+                🛰 Satelit
+              </Text>
+            </Pressable>
+          </View>
         </View>
-        <View style={styles.legend}>
-          <LegendDot color={t.success} label="Přílet PRG" />
-          <LegendDot color={t.accent} label="Odlet PRG" />
-          <LegendDot color={t.warning} label="Tranzit" />
-          <LegendDot color={t.textMuted} label="Na zemi" />
-        </View>
-        <View style={styles.controls}>
-          <Pressable
-            onPress={() => setShowRadar((v) => !v)}
-            style={[
-              styles.toggleBtn,
-              {
-                borderColor: t.border,
-                backgroundColor: showRadar ? t.accent : t.cardTint,
-              },
-            ]}
-          >
-            <Text style={[styles.toggleBtnText, { color: showRadar ? "#fff" : t.text }]}>
-              📡 Radar
-            </Text>
-          </Pressable>
-          <Pressable
-            onPress={() => setSatellite((v) => !v)}
-            style={[
-              styles.toggleBtn,
-              {
-                borderColor: t.border,
-                backgroundColor: satellite ? t.accent : t.cardTint,
-              },
-            ]}
-          >
-            <Text style={[styles.toggleBtnText, { color: satellite ? "#fff" : t.text }]}>
-              🛰 Satelit
-            </Text>
-          </Pressable>
+        <View style={styles.filtersRow}>
+          {AIRCRAFT_FILTERS.map((f) => (
+            <Chip
+              key={f.id}
+              label={f.label}
+              active={aircraftFilter === f.id}
+              count={filterCounts[f.id]}
+              onPress={() => setAircraftFilter(f.id)}
+            />
+          ))}
         </View>
         {error && <Text style={[styles.statusSub, { color: t.danger }]}>Chyba: {error}</Text>}
       </View>
@@ -652,6 +690,10 @@ export const MapScreen: React.FC = () => {
             </Popup>
           </CircleMarker>
           {matched.map(({ aircraft: a, flight: f }) => {
+            const visible =
+              aircraftFilter === "all" ||
+              bucketOf({ aircraft: a, flight: f }) === aircraftFilter
+            if (!visible) return null
             const color = a.onGround
               ? t.textMuted
               : f
@@ -739,21 +781,26 @@ const LegendDot: React.FC<{ color: string; label: string }> = ({ color, label })
     <Text style={[styles.legendLabel, { color: "#666" }]}>{label}</Text>
   </View>
 )
+LegendDot.displayName = "LegendDot"
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
   statusBar: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderBottomWidth: 1,
+    gap: 10,
+  },
+  statusTopRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     gap: 12,
     flexWrap: "wrap",
   },
   statusText: { fontSize: 13, fontWeight: "600" },
   statusSub: { fontSize: 11 },
+  filtersRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
   legend: { flexDirection: "row", gap: 12, flexWrap: "wrap" },
   legendItem: { flexDirection: "row", alignItems: "center", gap: 4 },
   legendDot: { width: 10, height: 10, borderRadius: 5 },

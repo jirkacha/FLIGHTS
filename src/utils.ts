@@ -65,6 +65,29 @@ export const fmtDateShort = (iso?: string): string => {
   return `${d.getDate()}. ${String(d.getMonth() + 1).padStart(2, "0")}.`
 }
 
+/**
+ * Returns "dnes" / "zítra" / "29. 5." — null when the date is today, so callers
+ * can render it only when meaningful.
+ */
+export const fmtDateRelative = (iso?: string): string | null => {
+  if (!iso) return null
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return null
+  const today = new Date()
+  const sameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  if (sameDay(d, today)) return null
+  const tomorrow = new Date(today)
+  tomorrow.setDate(today.getDate() + 1)
+  if (sameDay(d, tomorrow)) return "zítra"
+  const yesterday = new Date(today)
+  yesterday.setDate(today.getDate() - 1)
+  if (sameDay(d, yesterday)) return "včera"
+  return `${d.getDate()}. ${d.getMonth() + 1}.`
+}
+
 /** Format minute count as "+1 h 25 min" / "+25 min". */
 export const fmtDelay = (min: number): string => {
   const sign = min < 0 ? "−" : "+"

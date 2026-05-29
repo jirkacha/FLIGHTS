@@ -20,12 +20,15 @@ import { AirlineLogo, Chip, Toggle } from "../components"
 import {
   delayMinutes,
   effectiveTime,
-  fmtDateShort,
+  fmtDateRelative,
   fmtTime,
   flightProgress,
+  haversineKm,
   isTerminalStatus,
   minutesUntil,
+  PRG_COORDS,
 } from "../utils"
+import { getAirportCoords } from "../airports"
 
 type Props = NativeStackScreenProps<RootStackParamList, "Flights">
 
@@ -41,22 +44,41 @@ const ETA_FILTERS: { id: EtaFilter; label: string }[] = [
   { id: "all", label: "Vše" },
 ]
 
+/**
+ * 'Active' means scheduled or in-flight AND its effective time hasn't slipped
+ * more than 15 minutes into the past. Flights stuck on 'Delayed' without an
+ * updated time would otherwise bubble to the top of arrivals — confusing
+ * because the timetable should always look toward the future.
+ */
+const STALE_TOLERANCE_MS = 15 * 60_000
+
+const isStale = (f: Flight): boolean =>
+  Date.parse(effectiveTime(f)) < Date.now() - STALE_TOLERANCE_MS
+
 const matchesEta = (f: Flight, filter: EtaFilter): boolean => {
   switch (filter) {
     case "all":
       return true
     case "30m": {
-      if (isTerminalStatus(f)) return false
+      if (isTerminalStatus(f) || isStale(f)) return false
       const diff = Date.parse(effectiveTime(f)) - Date.now()
       return diff >= 0 && diff <= 30 * 60_000
     }
     case "active":
-      return !isTerminalStatus(f)
+      return !isTerminalStatus(f) && !isStale(f)
     case "delayed":
-      return !isTerminalStatus(f) && delayMinutes(f) >= 1
+      // Stale flights belong here — they're effectively delayed without a new
+      // ETA. The pile keeps them visible without polluting "Aktivní".
+      return !isTerminalStatus(f) && (delayMinutes(f) >= 1 || isStale(f))
     case "past":
       return f.status === "Arrived" || f.status === "Departed" || f.status === "Cancelled"
   }
+}
+
+const distanceForFlight = (f: Flight): number | null => {
+  const c = getAirportCoords(f.counterpart.iata)
+  if (!c) return null
+  return haversineKm(c[0], c[1], PRG_COORDS[0], PRG_COORDS[1])
 }
 
 // --- Component -------------------------------------------------------------
@@ -214,9 +236,13 @@ export const FlightsScreen: React.FC<Props> = ({ navigation }) => {
 // --- Row -------------------------------------------------------------------
 
 /**
- * Horizontal flight row inspired by airport board displays: one line per
- * flight with scheduled vs actual time, airline + number, route, terminal,
- * and a detail action. Active flights get a thin progress bar at the bottom.
+ * Airport-board style row: time + status on the left, prominent counterpart
+ * city in the middle, airline & flight number, terminal, and grouped actions
+ * on the right. Active flights get a thin progress fill at the bottom.
+ *
+ * Time block convention: BIG = best-known (actual or scheduled); when actual
+ * exists and differs, the original scheduled time is shown small + struck
+ * through directly below.
  */
 const FlightRow: React.FC<{
   flight: Flight
@@ -248,25 +274,32 @@ const FlightRow: React.FC<{
             ? t.success
             : t.border
 
+  const timeColor = isCancelled
+    ? t.danger
+    : isEarly
+      ? t.success
+      : isDelayed
+        ? t.warning
+        : t.text
+
   const statusBadgeColor = statusColor(flight.status, t)
 
   const counter = flight.counterpart
-  const counterLabel = counter.iata
-    ? `${counter.city ?? counter.name} (${counter.iata})`
-    : (counter.city ?? counter.name)
-
+  const counterCity = counter.city ?? counter.name
+  const distance = distanceForFlight(flight)
+  const showSchedDate = fmtDateRelative(flight.scheduledTime)
   const schedTime = fmtTime(flight.scheduledTime)
   const actualTime = flight.actualTime ? fmtTime(flight.actualTime) : null
-  const dateLabel = fmtDateShort(flight.actualTime ?? flight.scheduledTime)
+  const hasActualDiff = !!actualTime && actualTime !== schedTime
 
   return (
     <Pressable
       onPress={onPress}
-      style={({ pressed }) => [
+      style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
         styles.row,
         {
           backgroundColor: t.card,
-          borderColor: t.border,
+          borderColor: hovered ? t.accent : t.border,
           opacity: pressed ? 0.85 : 1,
         },
       ]}
@@ -276,53 +309,56 @@ const FlightRow: React.FC<{
       <View style={styles.rowBody}>
         {/* Time column */}
         <View style={styles.timeCol}>
-          {actualTime ? (
-            <>
-              <Text
-                style={[
-                  styles.timeSched,
-                  { color: t.textMuted, fontFamily: t.mono },
-                ]}
-              >
-                {schedTime}
-              </Text>
-              <View style={styles.timeMainRow}>
-                <Text
-                  style={[
-                    styles.timeMain,
-                    {
-                      color: isCancelled
-                        ? t.danger
-                        : isEarly
-                          ? t.success
-                          : isDelayed
-                            ? t.warning
-                            : t.text,
-                      fontFamily: t.mono,
-                    },
-                  ]}
-                >
-                  {actualTime}
-                </Text>
-                <Text style={[styles.timeDate, { color: t.textMuted, fontFamily: t.mono }]}>
-                  {dateLabel}
-                </Text>
-              </View>
-            </>
-          ) : (
-            <View style={styles.timeMainRow}>
-              <Text style={[styles.timeMain, { color: t.text, fontFamily: t.mono }]}>
-                {schedTime}
-              </Text>
+          <View style={styles.timeMainRow}>
+            <Text style={[styles.timeMain, { color: timeColor, fontFamily: t.mono }]}>
+              {actualTime ?? schedTime}
+            </Text>
+            {showSchedDate && (
               <Text style={[styles.timeDate, { color: t.textMuted, fontFamily: t.mono }]}>
-                {dateLabel}
+                {showSchedDate}
+              </Text>
+            )}
+          </View>
+          {hasActualDiff && (
+            <Text style={[styles.timeSched, { color: t.textMuted, fontFamily: t.mono }]}>
+              {schedTime}
+            </Text>
+          )}
+          <View style={styles.pillsRow}>
+            <View style={[styles.statusPill, { borderColor: statusBadgeColor }]}>
+              <Text style={[styles.statusPillText, { color: statusBadgeColor }]}>
+                {flight.status}
               </Text>
             </View>
-          )}
-          <View style={[styles.statusPill, { borderColor: statusBadgeColor }]}>
-            <Text style={[styles.statusPillText, { color: statusBadgeColor }]}>
-              {flight.status}
-            </Text>
+            {isImminent && eta >= 0 && (
+              <View style={[styles.etaPill, { backgroundColor: t.accent }]}>
+                <Text style={styles.etaPillText}>za {eta} min</Text>
+              </View>
+            )}
+          </View>
+        </View>
+
+        {/* Counterpart column — what the user actually wants to see */}
+        <View style={styles.destCol}>
+          <Text style={[styles.destText, { color: t.text }]} numberOfLines={1}>
+            {counterCity}
+          </Text>
+          <View style={styles.destSubRow}>
+            {counter.iata && (
+              <Text style={[styles.iataText, { color: t.accent, fontFamily: t.mono }]}>
+                {counter.iata}
+              </Text>
+            )}
+            {counter.countryCode && (
+              <Text style={[styles.countryText, { color: t.textMuted }]}>
+                · {counter.countryCode}
+              </Text>
+            )}
+            {distance != null && (
+              <Text style={[styles.distText, { color: t.textMuted, fontFamily: t.mono }]}>
+                · {Math.round(distance).toLocaleString()} km
+              </Text>
+            )}
           </View>
         </View>
 
@@ -342,16 +378,6 @@ const FlightRow: React.FC<{
           </View>
         </View>
 
-        {/* Destination column */}
-        <View style={styles.destCol}>
-          <Text style={[styles.destText, { color: t.accent }]} numberOfLines={1}>
-            {direction === "arrival" ? counterLabel : counterLabel}
-          </Text>
-          <Text style={[styles.destSub, { color: t.textMuted }]} numberOfLines={1}>
-            {direction === "arrival" ? "→ Praha (PRG)" : "Praha (PRG) →"}
-          </Text>
-        </View>
-
         {/* Terminal column */}
         <View style={styles.terminalCol}>
           {flight.terminal ? (
@@ -364,7 +390,7 @@ const FlightRow: React.FC<{
           )}
         </View>
 
-        {/* Actions column */}
+        {/* Actions column — primary detail pill + secondary map link */}
         <View style={styles.actionsCol}>
           <Pressable
             onPress={onPress}
@@ -381,17 +407,20 @@ const FlightRow: React.FC<{
               onMap()
             }}
             hitSlop={8}
-            style={({ pressed }) => [
+            style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
               styles.mapBtn,
-              { borderColor: t.border, opacity: pressed ? 0.6 : 1 },
+              {
+                borderColor: hovered ? t.accent : t.border,
+                backgroundColor: hovered ? t.cardTint : "transparent",
+                opacity: pressed ? 0.6 : 1,
+              },
             ]}
           >
-            <Text style={styles.mapBtnText}>🗺️</Text>
+            <Text style={[styles.mapBtnText, { color: t.accent }]}>🗺</Text>
           </Pressable>
         </View>
       </View>
 
-      {/* Thin progress bar at the bottom for active flights */}
       {showProgress && (
         <View style={[styles.progressTrack, { backgroundColor: t.border }]}>
           <View
@@ -417,7 +446,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     alignItems: "center",
-    gap: 10,
+    gap: 12,
     paddingHorizontal: 16,
     paddingTop: 14,
     paddingBottom: 10,
@@ -451,42 +480,51 @@ const styles = StyleSheet.create({
     gap: 16,
   },
 
-  timeCol: { minWidth: 110, gap: 4 },
+  timeCol: { minWidth: 130, gap: 2 },
   timeMainRow: { flexDirection: "row", alignItems: "baseline", gap: 8 },
+  timeMain: { fontSize: 24, fontWeight: "800", lineHeight: 28, letterSpacing: 0.5 },
+  timeDate: { fontSize: 12, fontWeight: "600" },
   timeSched: {
     fontSize: 12,
     fontWeight: "600",
     textDecorationLine: "line-through",
     lineHeight: 14,
+    marginTop: 2,
   },
-  timeMain: { fontSize: 22, fontWeight: "800", lineHeight: 26, letterSpacing: 0.5 },
-  timeDate: { fontSize: 12, fontWeight: "600" },
+  pillsRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 6 },
   statusPill: {
-    alignSelf: "flex-start",
     borderWidth: 1.5,
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 2,
-    marginTop: 2,
   },
   statusPillText: { fontSize: 11, fontWeight: "700", letterSpacing: 0.3 },
+  etaPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 999,
+  },
+  etaPillText: { color: "#fff", fontSize: 11, fontWeight: "700" },
+
+  destCol: { flex: 1.6, minWidth: 170, gap: 4 },
+  destText: { fontSize: 18, fontWeight: "800", letterSpacing: 0.2 },
+  destSubRow: { flexDirection: "row", alignItems: "baseline", flexWrap: "wrap", gap: 4 },
+  iataText: { fontSize: 13, fontWeight: "700", letterSpacing: 0.5 },
+  countryText: { fontSize: 12, fontWeight: "600" },
+  distText: { fontSize: 11, fontWeight: "600" },
 
   airlineCol: {
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
     minWidth: 180,
-    flex: 1.1,
+    flex: 1,
   },
-  flightNo: { fontSize: 17, fontWeight: "800", letterSpacing: 0.3 },
+  flightNo: { fontSize: 16, fontWeight: "800", letterSpacing: 0.3 },
   airlineName: { fontSize: 12, fontWeight: "500" },
 
-  destCol: { flex: 1.4, minWidth: 160, gap: 2 },
-  destText: { fontSize: 16, fontWeight: "700", letterSpacing: 0.2 },
-  destSub: { fontSize: 11, fontWeight: "500" },
-
   terminalCol: { minWidth: 56, alignItems: "center", gap: 2 },
-  terminalText: { fontSize: 18, fontWeight: "800", letterSpacing: 0.5 },
+  terminalText: { fontSize: 20, fontWeight: "800", letterSpacing: 0.5 },
   gateText: { fontSize: 10, fontWeight: "500" },
 
   actionsCol: { flexDirection: "row", alignItems: "center", gap: 8 },
