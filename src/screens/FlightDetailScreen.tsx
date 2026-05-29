@@ -1,11 +1,21 @@
 import React, { useEffect, useState } from "react"
-import { ScrollView, View, Text, StyleSheet, Pressable } from "react-native"
+import { ScrollView, View, Text, StyleSheet, Pressable, Image, Linking } from "react-native"
 import type { NativeStackScreenProps } from "@react-navigation/native-stack"
 import type { RootStackParamList } from "../navigation"
 import { useTheme } from "../theme"
 import { StatusBadge, AirlineLogo } from "../components"
 import { fetchLiveAircraft, type LiveAircraft } from "../opensky"
 import { matchFlightToAircraft } from "../matchFlights"
+import { fetchAircraftPhoto, type AircraftPhoto } from "../planespotters"
+import {
+  aircraftCategory,
+  aircraftCategoryLabel,
+  estimateDurationMin,
+  fmtDuration,
+  haversineKm,
+  PRG_COORDS,
+} from "../utils"
+import { getAirportCoords } from "../airports"
 
 type Props = NativeStackScreenProps<RootStackParamList, "FlightDetail">
 
@@ -23,24 +33,13 @@ const fmtFull = (iso?: string) => {
   }
 }
 
-const haversineKm = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
-  const R = 6371
-  const dLat = ((lat2 - lat1) * Math.PI) / 180
-  const dLon = ((lon2 - lon1) * Math.PI) / 180
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) ** 2
-  return R * 2 * Math.asin(Math.sqrt(a))
-}
-
-const PRG: [number, number] = [50.1008, 14.26]
+const PRG: [number, number] = PRG_COORDS
 
 export const FlightDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const t = useTheme()
   const { flight } = route.params
   const [live, setLive] = useState<LiveAircraft | null>(null)
+  const [photo, setPhoto] = useState<AircraftPhoto | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -62,6 +61,19 @@ export const FlightDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     }
   }, [flight])
 
+  // Fetch aircraft photo by registration (prefers live ADS-B reg if known).
+  useEffect(() => {
+    let cancelled = false
+    const reg = live?.registration ?? flight.aircraftReg
+    if (!reg) return
+    fetchAircraftPhoto(reg).then((p) => {
+      if (!cancelled) setPhoto(p)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [live?.registration, flight.aircraftReg])
+
   const delayMin =
     flight.actualTime && flight.scheduledTime
       ? Math.round(
@@ -71,6 +83,14 @@ export const FlightDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       : 0
 
   const distKm = live ? haversineKm(PRG[0], PRG[1], live.latitude, live.longitude) : null
+
+  const counterCoords = getAirportCoords(flight.counterpart.iata)
+  const routeKm = counterCoords
+    ? haversineKm(counterCoords[0], counterCoords[1], PRG[0], PRG[1])
+    : null
+  const estDurationMin = routeKm ? estimateDurationMin(routeKm) : null
+
+  const category = aircraftCategory(flight.aircraftModel, flight.airlineIata, flight.airlineIcao)
 
   return (
     <ScrollView style={{ backgroundColor: t.bg }} contentContainerStyle={styles.container}>
@@ -163,7 +183,17 @@ export const FlightDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           label="Zpoždění"
           value={delayMin > 0 ? `+${delayMin} min` : delayMin < 0 ? `${delayMin} min` : "—"}
           t={t}
-          highlight={delayMin > 15 ? t.warning : delayMin > 0 ? undefined : undefined}
+          highlight={delayMin >= 60 ? t.danger : delayMin >= 15 ? t.warning : delayMin < 0 ? t.success : undefined}
+        />
+        <DetailRow
+          label="Vzdálenost (great-circle)"
+          value={routeKm != null ? `${Math.round(routeKm).toLocaleString()} km` : "—"}
+          t={t}
+        />
+        <DetailRow
+          label="Odhad délky letu"
+          value={estDurationMin ? `~ ${fmtDuration(estDurationMin)}` : "—"}
+          t={t}
           last
         />
       </View>
@@ -174,9 +204,24 @@ export const FlightDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         <DetailRow label="Gate" value={flight.gate ?? "—"} t={t} last />
       </View>
 
-      <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border }]}>
+      <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border, overflow: "hidden" }]}>
         <Text style={[styles.sectionTitle, { color: t.textMuted }]}>LETADLO</Text>
+        {photo?.large ? (
+          <Pressable onPress={() => photo.link && Linking.openURL(photo.link)}>
+            <Image
+              source={{ uri: photo.large }}
+              style={styles.aircraftPhoto}
+              resizeMode="cover"
+            />
+            {photo.photographer && (
+              <Text style={[styles.photoCredit, { color: t.textMuted }]}>
+                © {photo.photographer} (Planespotters.net)
+              </Text>
+            )}
+          </Pressable>
+        ) : null}
         <DetailRow label="Model" value={flight.aircraftModel ?? "—"} t={t} />
+        <DetailRow label="Kategorie" value={aircraftCategoryLabel(category)} t={t} />
         <DetailRow label="Registrace" value={live?.registration ?? flight.aircraftReg ?? "—"} t={t} last />
       </View>
     </ScrollView>
@@ -228,4 +273,17 @@ const styles = StyleSheet.create({
   liveHeader: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 8 },
   liveTitle: { fontSize: 13, fontWeight: "700", letterSpacing: 0.5 },
   linkText: { fontSize: 13, fontWeight: "600" },
+  aircraftPhoto: {
+    alignSelf: "stretch",
+    height: 180,
+    marginHorizontal: -14,
+    marginTop: -8,
+    marginBottom: 8,
+    backgroundColor: "rgba(127,127,127,0.1)",
+  },
+  photoCredit: {
+    fontSize: 10,
+    paddingBottom: 8,
+    textAlign: "right",
+  },
 })

@@ -68,3 +68,76 @@ export const fmtDelay = (min: number): string => {
 
 export const isTerminalStatus = (f: Flight): boolean =>
   f.status === "Arrived" || f.status === "Departed" || f.status === "Cancelled"
+
+// --- Aircraft size classification ------------------------------------------------
+
+export type AircraftCategory = "small" | "medium" | "wide" | "jumbo" | "cargo" | "unknown"
+
+const RX_SMALL =
+  /\bATR\b|\bDHC\b|\bDash\b|\bSaab\b|\bCRJ\b|\bERJ\b|\bE-?(135|140|145|170|175)\b|\bBeech\b|\bCessna\b|\bPilatus\b|\bSF\b|\bJ4\b/i
+const RX_MEDIUM =
+  /\b737\b|7M[0-9]|\bA31[89]\b|\bA320\b|\bA321\b|\bA220\b|\b717\b|\b757\b|MD-?(80|90)\b|\bE19[05]\b/i
+const RX_WIDE = /\bA330\b|\bA340\b|\bA350\b|\b767\b|\b777\b|\b787\b|MD-?11\b|IL-?96\b/i
+const RX_JUMBO = /\bA380\b|\b747\b/i
+const RX_FREIGHTER = /\bF\b|Freighter|Cargo/i
+
+const CARGO_AIRLINE_IATA = new Set(["FX", "5X", "5Y", "CK", "CV", "GW", "HLF", "X3", "RH", "MP", "QY"])
+const CARGO_AIRLINE_ICAO = new Set(["FDX", "UPS", "GTI", "CKK", "CLX", "BOX", "HLF", "DHK", "DHX", "BCS"])
+
+export const aircraftCategory = (
+  model?: string,
+  airlineIata?: string,
+  airlineIcao?: string,
+): AircraftCategory => {
+  if (airlineIata && CARGO_AIRLINE_IATA.has(airlineIata.toUpperCase())) return "cargo"
+  if (airlineIcao && CARGO_AIRLINE_ICAO.has(airlineIcao.toUpperCase())) return "cargo"
+  if (model && RX_FREIGHTER.test(model)) return "cargo"
+  if (model) {
+    if (RX_JUMBO.test(model)) return "jumbo"
+    if (RX_WIDE.test(model)) return "wide"
+    if (RX_MEDIUM.test(model)) return "medium"
+    if (RX_SMALL.test(model)) return "small"
+  }
+  return "unknown"
+}
+
+const SIZE_BY_CATEGORY: Record<AircraftCategory, number> = {
+  small: 14,
+  medium: 18,
+  wide: 26,
+  jumbo: 32,
+  cargo: 20,
+  unknown: 16,
+}
+
+export const aircraftIconSize = (cat: AircraftCategory): number => SIZE_BY_CATEGORY[cat]
+
+const LABEL_BY_CATEGORY: Record<AircraftCategory, string> = {
+  small: "Regionální",
+  medium: "Středně velký",
+  wide: "Široký trup",
+  jumbo: "Jumbo",
+  cargo: "Cargo",
+  unknown: "Neznámý",
+}
+
+export const aircraftCategoryLabel = (cat: AircraftCategory): string => LABEL_BY_CATEGORY[cat]
+
+// --- Flight duration ------------------------------------------------------------
+
+const CRUISE_KMH = 850
+const OVERHEAD_MIN = 30
+
+/** Rough flight duration in minutes from great-circle distance. */
+export const estimateDurationMin = (distanceKm: number): number =>
+  Math.round((distanceKm / CRUISE_KMH) * 60) + OVERHEAD_MIN
+
+/** Human-readable duration: "3 h 45 min" / "45 min". */
+export const fmtDuration = (min: number): string => {
+  if (!Number.isFinite(min) || min <= 0) return "—"
+  const h = Math.floor(min / 60)
+  const m = Math.round(min % 60)
+  if (h === 0) return `${m} min`
+  if (m === 0) return `${h} h`
+  return `${h} h ${m} min`
+}

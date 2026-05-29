@@ -14,11 +14,14 @@ import type { RootStackParamList } from "../navigation"
 import type { Flight, FlightDirection, FlightStatus } from "../types"
 import { fetchFlights } from "../api"
 import { useTheme, type Theme } from "../theme"
-import { StatusBadge, TimeDisplay, AirlineLogo, DelayBadge, DirectionalPlane } from "../components"
+import { StatusBadge, TimeDisplay, AirlineLogo, DelayBadge, AircraftIcon } from "../components"
 import {
   bearingDeg,
   delayMinutes,
   effectiveTime,
+  estimateDurationMin,
+  fmtDuration,
+  haversineKm,
   isTerminalStatus,
   minutesUntil,
   PRG_COORDS,
@@ -27,7 +30,21 @@ import { getAirportCoords } from "../airports"
 
 type Props = NativeStackScreenProps<RootStackParamList, "Flights">
 
-const STATUSES: ("All" | FlightStatus)[] = [
+// --- Filters ---------------------------------------------------------------
+
+type EtaFilter = "all" | "30m" | "2h" | "active" | "delayed" | "cancelled" | "past"
+
+const ETA_FILTERS: { id: EtaFilter; label: string }[] = [
+  { id: "all", label: "Vše" },
+  { id: "30m", label: "≤ 30 min" },
+  { id: "2h", label: "≤ 2 h" },
+  { id: "active", label: "Aktivní" },
+  { id: "delayed", label: "Zpožděné" },
+  { id: "cancelled", label: "Zrušené" },
+  { id: "past", label: "Přistálé / odlétlé" },
+]
+
+const STATUS_FILTERS: ("All" | FlightStatus)[] = [
   "All",
   "Scheduled",
   "Boarding",
@@ -38,12 +55,29 @@ const STATUSES: ("All" | FlightStatus)[] = [
   "Departed",
 ]
 
-const IMMINENT_WINDOW_MS = 30 * 60 * 1000
-
-const isImminent = (f: Flight): boolean => {
-  if (isTerminalStatus(f)) return false
-  const diff = Date.parse(effectiveTime(f)) - Date.now()
-  return diff >= 0 && diff <= IMMINENT_WINDOW_MS
+const matchesEta = (f: Flight, filter: EtaFilter): boolean => {
+  switch (filter) {
+    case "all":
+      return true
+    case "30m": {
+      if (isTerminalStatus(f)) return false
+      const diff = Date.parse(effectiveTime(f)) - Date.now()
+      return diff >= 0 && diff <= 30 * 60_000
+    }
+    case "2h": {
+      if (isTerminalStatus(f)) return false
+      const diff = Date.parse(effectiveTime(f)) - Date.now()
+      return diff >= 0 && diff <= 2 * 60 * 60_000
+    }
+    case "active":
+      return !isTerminalStatus(f)
+    case "delayed":
+      return !isTerminalStatus(f) && delayMinutes(f) >= 1
+    case "cancelled":
+      return f.status === "Cancelled"
+    case "past":
+      return f.status === "Arrived" || f.status === "Departed"
+  }
 }
 
 const bearingForFlight = (f: Flight): number | null => {
@@ -54,22 +88,25 @@ const bearingForFlight = (f: Flight): number | null => {
     : bearingDeg(PRG_COORDS[0], PRG_COORDS[1], c[0], c[1])
 }
 
-type ListItem =
-  | { kind: "imminent-header"; direction: FlightDirection }
-  | { kind: "active-header"; count: number }
-  | { kind: "past-header"; count: number; expanded: boolean }
-  | { kind: "flight"; flight: Flight; imminent: boolean; muted?: boolean }
+const distanceForFlight = (f: Flight): number | null => {
+  const c = getAirportCoords(f.counterpart.iata)
+  if (!c) return null
+  return haversineKm(c[0], c[1], PRG_COORDS[0], PRG_COORDS[1])
+}
+
+// --- Component -------------------------------------------------------------
 
 export const FlightsScreen: React.FC<Props> = ({ navigation }) => {
   const t = useTheme()
   const [direction, setDirection] = useState<FlightDirection>("arrival")
+  const [etaFilter, setEtaFilter] = useState<EtaFilter>("active")
   const [statusFilter, setStatusFilter] = useState<"All" | FlightStatus>("All")
+  const [showStatusFilter, setShowStatusFilter] = useState(false)
   const [flights, setFlights] = useState<Flight[]>([])
   const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isMock, setIsMock] = useState(false)
-  const [pastExpanded, setPastExpanded] = useState(false)
 
   const load = useCallback(
     async (refresh = false) => {
@@ -96,49 +133,32 @@ export const FlightsScreen: React.FC<Props> = ({ navigation }) => {
     return () => clearInterval(id)
   }, [load])
 
-  // Reset "expanded past" whenever the user switches direction or filter.
-  useEffect(() => setPastExpanded(false), [direction, statusFilter])
+  const etaCounts = useMemo(() => {
+    const counts: Record<EtaFilter, number> = {
+      all: flights.length,
+      "30m": 0,
+      "2h": 0,
+      active: 0,
+      delayed: 0,
+      cancelled: 0,
+      past: 0,
+    }
+    for (const f of flights) {
+      if (matchesEta(f, "30m")) counts["30m"]++
+      if (matchesEta(f, "2h")) counts["2h"]++
+      if (matchesEta(f, "active")) counts.active++
+      if (matchesEta(f, "delayed")) counts.delayed++
+      if (matchesEta(f, "cancelled")) counts.cancelled++
+      if (matchesEta(f, "past")) counts.past++
+    }
+    return counts
+  }, [flights])
 
-  const filtered = useMemo(
-    () => (statusFilter === "All" ? flights : flights.filter((f) => f.status === statusFilter)),
-    [flights, statusFilter],
-  )
-
-  const { imminent, active, past, delayedCount } = useMemo(() => {
-    const imminent = filtered.filter(isImminent)
-    const imminentIds = new Set(imminent.map((f) => f.id))
-    const active: Flight[] = []
-    const past: Flight[] = []
-    let delayedCount = 0
-    for (const f of filtered) {
-      if (delayMinutes(f) > 0 && !isTerminalStatus(f)) delayedCount++
-      if (imminentIds.has(f.id)) continue
-      if (isTerminalStatus(f)) past.push(f)
-      else active.push(f)
-    }
-    // Past list: most-recently-completed first.
-    past.sort((a, b) => effectiveTime(b).localeCompare(effectiveTime(a)))
-    return { imminent: imminent.slice(0, 5), active, past, delayedCount }
-  }, [filtered])
-
-  const listData = useMemo<ListItem[]>(() => {
-    const items: ListItem[] = []
-    if (imminent.length > 0) {
-      items.push({ kind: "imminent-header", direction })
-      for (const f of imminent) items.push({ kind: "flight", flight: f, imminent: true })
-    }
-    if (active.length > 0) {
-      items.push({ kind: "active-header", count: active.length })
-      for (const f of active) items.push({ kind: "flight", flight: f, imminent: false })
-    }
-    if (past.length > 0) {
-      items.push({ kind: "past-header", count: past.length, expanded: pastExpanded })
-      if (pastExpanded) {
-        for (const f of past) items.push({ kind: "flight", flight: f, imminent: false, muted: true })
-      }
-    }
-    return items
-  }, [imminent, active, past, direction, pastExpanded])
+  const filtered = useMemo(() => {
+    let list = flights.filter((f) => matchesEta(f, etaFilter))
+    if (statusFilter !== "All") list = list.filter((f) => f.status === statusFilter)
+    return list
+  }, [flights, etaFilter, statusFilter])
 
   return (
     <View style={[styles.container, { backgroundColor: t.bg }]}>
@@ -160,50 +180,69 @@ export const FlightsScreen: React.FC<Props> = ({ navigation }) => {
         })}
       </View>
 
-      {/* Stats line */}
-      {flights.length > 0 && (
-        <View style={styles.statsRow}>
-          <Text style={[styles.statsText, { color: t.textMuted }]}>
-            <Text style={{ color: t.text, fontWeight: "600" }}>{active.length + imminent.length}</Text>{" "}
-            aktivních
-            {delayedCount > 0 && (
-              <>
-                {" · "}
-                <Text style={{ color: t.warning, fontWeight: "600" }}>{delayedCount}</Text> zpožděných
-              </>
-            )}
-            {past.length > 0 && (
-              <>
-                {" · "}
-                {past.length} dokončených
-              </>
-            )}
-          </Text>
-        </View>
-      )}
-
-      {/* Status filter */}
+      {/* ETA filter chips */}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.filterRow}
       >
-        {STATUSES.map((s) => {
-          const active = statusFilter === s
+        {ETA_FILTERS.map((f) => {
+          const active = etaFilter === f.id
+          const count = etaCounts[f.id]
           return (
             <Pressable
-              key={s}
-              onPress={() => setStatusFilter(s)}
+              key={f.id}
+              onPress={() => setEtaFilter(f.id)}
               style={[
                 styles.chip,
                 { borderColor: t.border, backgroundColor: active ? t.accent : t.card },
               ]}
             >
-              <Text style={[styles.chipText, { color: active ? "#fff" : t.text }]}>{s}</Text>
+              <Text style={[styles.chipText, { color: active ? "#fff" : t.text }]}>
+                {f.label}
+                <Text style={{ color: active ? "#fff" : t.textMuted, fontWeight: "400" }}>
+                  {"  "}
+                  {count}
+                </Text>
+              </Text>
             </Pressable>
           )
         })}
       </ScrollView>
+
+      {/* Status filter (collapsible) */}
+      <Pressable
+        onPress={() => setShowStatusFilter((v) => !v)}
+        style={styles.statusToggle}
+      >
+        <Text style={[styles.statusToggleText, { color: t.textMuted }]}>
+          {showStatusFilter ? "▾" : "▸"} Filtr dle stavu
+          {statusFilter !== "All" ? `: ${statusFilter}` : ""}
+        </Text>
+      </Pressable>
+      {showStatusFilter && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filterRow}
+        >
+          {STATUS_FILTERS.map((s) => {
+            const active = statusFilter === s
+            return (
+              <Pressable
+                key={s}
+                onPress={() => setStatusFilter(s)}
+                style={[
+                  styles.chip,
+                  { borderColor: t.border, backgroundColor: active ? t.accent : t.card },
+                ]}
+              >
+                <Text style={[styles.chipText, { color: active ? "#fff" : t.text }]}>{s}</Text>
+              </Pressable>
+            )
+          })}
+        </ScrollView>
+      )}
 
       {isMock && (
         <View style={[styles.banner, { backgroundColor: t.warning }]}>
@@ -225,10 +264,8 @@ export const FlightsScreen: React.FC<Props> = ({ navigation }) => {
         </View>
       ) : (
         <FlatList
-          data={listData}
-          keyExtractor={(item, idx) =>
-            item.kind === "flight" ? `f-${item.flight.id}-${item.muted ? "p" : "a"}` : `h-${item.kind}-${idx}`
-          }
+          data={filtered}
+          keyExtractor={(f) => f.id}
           contentContainerStyle={{ padding: 12, paddingBottom: 24 }}
           refreshControl={
             <RefreshControl
@@ -237,78 +274,58 @@ export const FlightsScreen: React.FC<Props> = ({ navigation }) => {
               tintColor={t.accent}
             />
           }
-          ItemSeparatorComponent={({ leadingItem }: { leadingItem?: ListItem }) =>
-            leadingItem && leadingItem.kind === "flight" ? <View style={{ height: 8 }} /> : null
-          }
+          ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
           ListEmptyComponent={
-            <Text style={[styles.empty, { color: t.textMuted }]}>Žádné lety k zobrazení.</Text>
+            <Text style={[styles.empty, { color: t.textMuted }]}>
+              Žádné lety pro tento filtr.
+            </Text>
           }
-          renderItem={({ item }) => {
-            if (item.kind === "imminent-header") {
-              return (
-                <SectionHeader
-                  t={t}
-                  title={`⏰ ${item.direction === "arrival" ? "Brzy přilétají" : "Brzy odlétají"}`}
-                  subtitle="do 30 minut"
-                />
-              )
-            }
-            if (item.kind === "active-header") {
-              return <SectionHeader t={t} title="Aktivní" subtitle={`${item.count}`} compact />
-            }
-            if (item.kind === "past-header") {
-              return (
-                <Pressable
-                  onPress={() => setPastExpanded((v) => !v)}
-                  style={[styles.pastToggle, { borderColor: t.border, backgroundColor: t.card }]}
-                >
-                  <Text style={[styles.pastToggleText, { color: t.textMuted }]}>
-                    {item.expanded ? "▾" : "▸"} Přistálé / odlétlé / zrušené ({item.count})
-                  </Text>
-                </Pressable>
-              )
-            }
-            return (
-              <FlightRow
-                flight={item.flight}
-                direction={direction}
-                imminent={item.imminent}
-                muted={item.muted}
-                onPress={() => navigation.navigate("FlightDetail", { flight: item.flight })}
-                onMap={() => navigation.navigate("Map", { focusFlightId: item.flight.id })}
-                t={t}
-              />
-            )
-          }}
+          renderItem={({ item }) => (
+            <FlightRow
+              flight={item}
+              direction={direction}
+              onPress={() => navigation.navigate("FlightDetail", { flight: item })}
+              onMap={() => navigation.navigate("Map", { focusFlightId: item.id })}
+              t={t}
+            />
+          )}
         />
       )}
     </View>
   )
 }
 
-const SectionHeader: React.FC<{
-  t: Theme
-  title: string
-  subtitle?: string
-  compact?: boolean
-}> = ({ t, title, subtitle, compact }) => (
-  <View style={[styles.sectionHeader, compact && { marginTop: 4 }]}>
-    <Text style={[styles.sectionTitle, { color: t.text }]}>{title}</Text>
-    {subtitle && <Text style={[styles.sectionSub, { color: t.textMuted }]}>{subtitle}</Text>}
-  </View>
-)
+// --- Row -------------------------------------------------------------------
 
 const FlightRow: React.FC<{
   flight: Flight
   direction: FlightDirection
-  imminent: boolean
-  muted?: boolean
   onPress: () => void
   onMap: () => void
   t: Theme
-}> = ({ flight, direction, imminent, muted, onPress, onMap, t }) => {
+}> = ({ flight, direction, onPress, onMap, t }) => {
   const eta = minutesUntil(effectiveTime(flight))
   const heading = bearingForFlight(flight)
+  const distance = distanceForFlight(flight)
+  const duration = distance ? estimateDurationMin(distance) : null
+  const delay = delayMinutes(flight)
+  const isEarly = delay < 0 && !isTerminalStatus(flight)
+  const isImminent = !isTerminalStatus(flight) && eta >= 0 && eta <= 30
+  const isDelayed = delay >= 15 && !isTerminalStatus(flight)
+  const isCancelled = flight.status === "Cancelled"
+
+  // Border color encodes "watchworthy" state.
+  const borderColor = isCancelled
+    ? t.danger
+    : isImminent
+      ? t.accent
+      : isDelayed
+        ? t.warning
+        : isEarly
+          ? t.success
+          : t.border
+  const borderWidth = isCancelled || isImminent || isDelayed || isEarly ? 2 : 1
+
   return (
     <Pressable
       onPress={onPress}
@@ -316,16 +333,16 @@ const FlightRow: React.FC<{
         styles.card,
         {
           backgroundColor: t.card,
-          borderColor: imminent ? t.accent : t.border,
-          borderWidth: imminent ? 2 : 1,
-          opacity: pressed ? 0.7 : muted ? 0.65 : 1,
+          borderColor,
+          borderWidth,
+          opacity: pressed ? 0.7 : isTerminalStatus(flight) && !isCancelled ? 0.78 : 1,
         },
       ]}
     >
       <View style={styles.cardLeft}>
         <TimeDisplay flight={flight} />
         <Text style={[styles.flightNumber, { color: t.textMuted }]}>{flight.number}</Text>
-        {imminent && eta >= 0 && (
+        {isImminent && eta >= 0 && (
           <View style={[styles.etaPill, { backgroundColor: t.accent }]}>
             <Text style={styles.etaPillText}>za {eta} min</Text>
           </View>
@@ -339,22 +356,29 @@ const FlightRow: React.FC<{
           </Text>
         </View>
         <View style={styles.routeRow}>
-          <DirectionalPlane headingDeg={heading} size={16} color={imminent ? t.accent : t.text} />
+          <AircraftIcon
+            flight={flight}
+            headingDeg={heading}
+            color={isImminent ? t.accent : t.text}
+          />
           <Text style={[styles.airport, { color: t.text }]} numberOfLines={1}>
-            {direction === "departure" ? " " : " z "}
+            {"  "}
+            {direction === "departure" ? "→ " : "← z "}
             {flight.counterpart.city ?? flight.counterpart.name}
             {flight.counterpart.iata ? ` (${flight.counterpart.iata})` : ""}
           </Text>
         </View>
-        {!!flight.aircraftModel && (
+        {(flight.aircraftModel || duration || distance) && (
           <Text style={[styles.aircraftLine, { color: t.textMuted }]} numberOfLines={1}>
-            🛩  {flight.aircraftModel}
+            {flight.aircraftModel ? `🛩  ${flight.aircraftModel}` : "🛩  —"}
             {flight.aircraftReg ? ` · ${flight.aircraftReg}` : ""}
+            {duration ? `  ·  ⏱ ${fmtDuration(duration)}` : ""}
+            {distance ? `  ·  ${Math.round(distance)} km` : ""}
           </Text>
         )}
         <View style={styles.statusRow}>
           <StatusBadge flight={flight} />
-          <DelayBadge flight={flight} threshold={15} />
+          <DelayBadge flight={flight} threshold={1} />
         </View>
       </View>
       <View style={styles.cardRight}>
@@ -394,33 +418,15 @@ const styles = StyleSheet.create({
   },
   toggleBtn: { flex: 1, paddingVertical: 10, alignItems: "center", borderRadius: 9 },
   toggleText: { fontSize: 15, fontWeight: "600" },
-  statsRow: { paddingHorizontal: 14, paddingTop: 2, paddingBottom: 6 },
-  statsText: { fontSize: 12 },
   filterRow: { paddingHorizontal: 12, paddingBottom: 8, gap: 6, flexDirection: "row" },
   chip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, borderWidth: 1 },
   chipText: { fontSize: 13, fontWeight: "500" },
+  statusToggle: { paddingHorizontal: 14, paddingTop: 2, paddingBottom: 4 },
+  statusToggleText: { fontSize: 12, fontWeight: "500" },
   banner: { padding: 8, marginHorizontal: 12, borderRadius: 8, marginBottom: 4 },
   bannerText: { color: "#fff", fontSize: 12, fontWeight: "500" },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
   empty: { textAlign: "center", marginTop: 40 },
-  sectionHeader: {
-    flexDirection: "row",
-    alignItems: "baseline",
-    justifyContent: "space-between",
-    marginBottom: 8,
-    marginTop: 12,
-  },
-  sectionTitle: { fontSize: 16, fontWeight: "700" },
-  sectionSub: { fontSize: 12 },
-  pastToggle: {
-    marginTop: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    alignItems: "center",
-  },
-  pastToggleText: { fontSize: 13, fontWeight: "600" },
   card: {
     flexDirection: "row",
     padding: 12,

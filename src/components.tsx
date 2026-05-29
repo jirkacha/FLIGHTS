@@ -2,7 +2,14 @@ import React from "react"
 import { View, Text, Image, StyleSheet } from "react-native"
 import { useTheme, statusColor } from "./theme"
 import type { Flight } from "./types"
-import { delayMinutes, fmtDelay, fmtTime } from "./utils"
+import {
+  aircraftCategory,
+  aircraftIconSize,
+  delayMinutes,
+  fmtDelay,
+  fmtTime,
+  type AircraftCategory,
+} from "./utils"
 
 export const StatusBadge: React.FC<{ flight: Flight }> = ({ flight }) => {
   const t = useTheme()
@@ -38,16 +45,19 @@ export const TimeDisplay: React.FC<{ flight: Flight; align?: "left" | "right" }>
   )
 }
 
-/** Pill displaying flight delay. Hidden when delay is ≤0 or the flight is cancelled. */
+/** Pill displaying flight delay or early arrival. Hidden when delta is 0 or unknown. */
 export const DelayBadge: React.FC<{ flight: Flight; threshold?: number }> = ({
   flight,
   threshold = 1,
 }) => {
   const t = useTheme()
   const min = delayMinutes(flight)
-  if (flight.status === "Cancelled" || min < threshold) return null
-  const heavy = min >= 60
-  const color = heavy ? t.danger : t.warning
+  if (flight.status === "Cancelled") return null
+  if (Math.abs(min) < threshold) return null
+  let color = t.warning
+  if (min < 0) color = t.success
+  else if (min >= 60) color = t.danger
+  else if (min < 15) color = "#ca8a04" // muted amber for minor delays
   return (
     <View style={[styles.delayBadge, { backgroundColor: color }]}>
       <Text style={styles.delayBadgeText}>{fmtDelay(min)}</Text>
@@ -56,21 +66,54 @@ export const DelayBadge: React.FC<{ flight: Flight; threshold?: number }> = ({
 }
 
 /**
- * Small ✈ icon rotated to the given heading (0 = north). The font glyph "✈"
- * naturally points to ~45° NE, so we subtract 45 to align it with the heading.
+ * Plane glyph that scales with aircraft size category and rotates to heading.
+ * Cargo aircraft get a small parcel decoration.
  */
+export const AircraftIcon: React.FC<{
+  flight: Flight
+  headingDeg?: number | null
+  color?: string
+}> = ({ flight, headingDeg, color }) => {
+  const t = useTheme()
+  const cat = aircraftCategory(flight.aircraftModel, flight.airlineIata, flight.airlineIcao)
+  const size = aircraftIconSize(cat)
+  const isCargo = cat === "cargo"
+  const tint = color ?? (isCargo ? t.warning : t.text)
+  const rot = headingDeg == null ? 0 : headingDeg - 45
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>
+      <Text
+        style={{
+          fontSize: size,
+          lineHeight: size,
+          color: tint,
+          transform: [{ rotate: `${rot}deg` }],
+        }}
+      >
+        ✈
+      </Text>
+      {isCargo && (
+        <Text style={{ fontSize: Math.max(10, size - 8), lineHeight: size, marginLeft: -2 }}>📦</Text>
+      )}
+    </View>
+  )
+}
+
+/** Backwards-compatible alias used by the map screen. */
 export const DirectionalPlane: React.FC<{
   headingDeg?: number | null
   size?: number
   color?: string
-}> = ({ headingDeg, size = 18, color }) => {
+  category?: AircraftCategory
+}> = ({ headingDeg, size = 18, color, category }) => {
   const t = useTheme()
+  const finalSize = category ? aircraftIconSize(category) : size
   const rot = headingDeg == null ? 0 : headingDeg - 45
   return (
     <Text
       style={{
-        fontSize: size,
-        lineHeight: size,
+        fontSize: finalSize,
+        lineHeight: finalSize,
         color: color ?? t.textMuted,
         transform: [{ rotate: `${rot}deg` }],
       }}
