@@ -15,6 +15,7 @@ export type Flight = {
   number: string
   airlineName: string
   airlineIata?: string
+  airlineIcao?: string
   direction: FlightDirection
   /** Counterpart airport (origin for arrivals, destination for departures) */
   counterpart: {

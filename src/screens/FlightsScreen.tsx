@@ -14,7 +14,7 @@ import type { RootStackParamList } from "../navigation"
 import type { Flight, FlightDirection, FlightStatus } from "../types"
 import { fetchFlights } from "../api"
 import { useTheme, type Theme } from "../theme"
-import { StatusBadge, TimeDisplay } from "../components"
+import { StatusBadge, TimeDisplay, AirlineLogo } from "../components"
 
 type Props = NativeStackScreenProps<RootStackParamList, "Flights">
 
@@ -248,14 +248,23 @@ const FlightRow: React.FC<{
         )}
       </View>
       <View style={styles.cardMiddle}>
+        <View style={styles.airlineRow}>
+          <AirlineLogo iata={flight.airlineIata} size={22} />
+          <Text style={[styles.airline, { color: t.textMuted }]} numberOfLines={1}>
+            {flight.airlineName}
+          </Text>
+        </View>
         <Text style={[styles.airport, { color: t.text }]} numberOfLines={1}>
           {direction === "departure" ? "→ " : "← "}
           {flight.counterpart.city ?? flight.counterpart.name}
           {flight.counterpart.iata ? ` (${flight.counterpart.iata})` : ""}
         </Text>
-        <Text style={[styles.airline, { color: t.textMuted }]} numberOfLines={1}>
-          {flight.airlineName}
-        </Text>
+        {!!flight.aircraftModel && (
+          <Text style={[styles.aircraftLine, { color: t.textMuted }]} numberOfLines={1}>
+            🛩  {flight.aircraftModel}
+            {flight.aircraftReg ? ` · ${flight.aircraftReg}` : ""}
+          </Text>
+        )}
         <View style={{ marginTop: 4 }}>
           <StatusBadge flight={flight} />
         </View>
@@ -318,8 +327,10 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
   },
   etaPillText: { color: "#fff", fontSize: 10, fontWeight: "700" },
-  airport: { fontSize: 15, fontWeight: "600" },
-  airline: { fontSize: 12, marginTop: 2 },
+  airport: { fontSize: 15, fontWeight: "600", marginTop: 4 },
+  airlineRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  airline: { fontSize: 12, flex: 1 },
+  aircraftLine: { fontSize: 11, marginTop: 4 },
   gate: { fontSize: 14, fontWeight: "600" },
   gateSub: { fontSize: 11, marginTop: 2 },
 })

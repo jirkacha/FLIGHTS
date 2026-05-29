@@ -1,12 +1,11 @@
 import React from "react"
-import { View, Text, StyleSheet } from "react-native"
+import { View, Text, Image, StyleSheet } from "react-native"
 import { useTheme, statusColor } from "./theme"
 import type { Flight } from "./types"
 
 const fmtTime = (iso: string) => {
   try {
-    const d = new Date(iso)
-    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
   } catch {
     return iso
   }
@@ -46,6 +45,36 @@ export const TimeDisplay: React.FC<{ flight: Flight; align?: "left" | "right" }>
   )
 }
 
+/**
+ * Airline logo from Kiwi.com's free image CDN.
+ * Falls back to a colored circle with IATA initials when no logo is found.
+ */
+export const AirlineLogo: React.FC<{ iata?: string; size?: number }> = ({ iata, size = 32 }) => {
+  const t = useTheme()
+  const [errored, setErrored] = React.useState(false)
+  const code = iata?.toUpperCase()
+  if (!code || errored) {
+    return (
+      <View
+        style={[
+          styles.fallback,
+          { width: size, height: size, borderRadius: size / 2, backgroundColor: t.border },
+        ]}
+      >
+        <Text style={[styles.fallbackText, { color: t.textMuted }]}>{code ?? "?"}</Text>
+      </View>
+    )
+  }
+  return (
+    <Image
+      source={{ uri: `https://images.kiwi.com/airlines/64/${code}.png` }}
+      style={{ width: size, height: size, borderRadius: 6 }}
+      resizeMode="contain"
+      onError={() => setErrored(true)}
+    />
+  )
+}
+
 const styles = StyleSheet.create({
   badge: {
     borderWidth: 1,
@@ -56,4 +85,6 @@ const styles = StyleSheet.create({
   },
   badgeText: { fontSize: 11, fontWeight: "600" },
   time: { fontSize: 16, fontWeight: "600" },
+  fallback: { justifyContent: "center", alignItems: "center" },
+  fallbackText: { fontSize: 11, fontWeight: "700" },
 })
