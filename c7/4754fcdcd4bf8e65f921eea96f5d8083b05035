@@ -1,0 +1,19 @@
+src/matchFlights.ts
+  s_d4466cc27ae1bf::t_f2f49e232d78c9 6-7,11-14,16-19,26-38,41-56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "c74754fcdcd4bf8e65f921eea96f5d8083b05035",
+  "prompts": {},
+  "sessions": {
+    "s_d4466cc27ae1bf": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_18cdf5031ffeVQFKA1g4CLBe23",
+        "model": "claude-opus-4.7"
+      },
+      "human_author": "jirkacha <jirkacha@gmail.com>"
+    }
+  }
+}
