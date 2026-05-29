@@ -31,24 +31,206 @@ const PLANE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" w
     d="M16 1.5 l1.6 9.4 12.4 6.2 v2.6 l-12.4 -3.7 -1 7.4 4.3 2.6 v2 l-5.0 -1.4 -5.0 1.4 v-2 l4.3 -2.6 -1 -7.4 -12.4 3.7 v-2.6 l12.4 -6.2 z"/>
 </svg>`
 
+const ICON_CACHE = new Map<string, L.DivIcon>()
+
 const planeIcon = (heading = 0, color = "#666", selected = false) => {
+  // Round heading to 5° buckets so neighboring values share an icon and we
+  // don't churn through 360 distinct cache entries while a plane turns.
+  const h = Math.round(heading / 5) * 5
+  const key = `${h}-${color}-${selected}`
+  const cached = ICON_CACHE.get(key)
+  if (cached) return cached
   const size = selected ? 36 : 24
-  return L.divIcon({
+  const icon = L.divIcon({
     className: "plane-marker",
     html: `
-      <div style="width:${size}px; height:${size}px; transform: translate(-50%, -50%) rotate(${heading}deg); color:${color}; filter: drop-shadow(0 1px 1.5px rgba(0,0,0,0.55));">
+      <div style="width:${size}px; height:${size}px; transform: translate(-50%, -50%) rotate(${h}deg); color:${color}; filter: drop-shadow(0 1px 1.5px rgba(0,0,0,0.55));">
         ${PLANE_SVG}
       </div>
     `,
     iconSize: [0, 0],
     iconAnchor: [0, 0],
   })
+  ICON_CACHE.set(key, icon)
+  return icon
 }
 
 type Matched = {
   aircraft: LiveAircraft
   flight?: Flight
 }
+
+const eqAircraft = (prev: PlaneMarkerProps, next: PlaneMarkerProps) =>
+  prev.aircraft.icao24 === next.aircraft.icao24 &&
+  prev.aircraft.onGround === next.aircraft.onGround &&
+  Math.abs(prev.aircraft.latitude - next.aircraft.latitude) < 0.0002 &&
+  Math.abs(prev.aircraft.longitude - next.aircraft.longitude) < 0.0002 &&
+  (prev.aircraft.headingDeg ?? 0) === (next.aircraft.headingDeg ?? 0) &&
+  prev.selected === next.selected &&
+  prev.color === next.color &&
+  prev.flight?.id === next.flight?.id &&
+  prev.flight?.status === next.flight?.status
+
+type PlaneMarkerProps = {
+  aircraft: LiveAircraft
+  flight?: Flight
+  selected: boolean
+  color: string
+  accent: string
+  distKm: number
+  onToggle: () => void
+  onOpenDetail: (f: Flight) => void
+}
+
+const PlaneMarker: React.FC<PlaneMarkerProps> = React.memo(
+  ({ aircraft: a, flight: f, selected, color, accent, distKm, onToggle, onOpenDetail }) => {
+    const hoverTitle = f?.number ?? a.callsign ?? a.icao24
+    const hoverRoute = f
+      ? f.direction === "arrival"
+        ? `${f.counterpart.iata ?? f.counterpart.name} → PRG`
+        : `PRG → ${f.counterpart.iata ?? f.counterpart.name}`
+      : a.callsign
+        ? "Tranzit"
+        : ""
+    const hoverMeta = [
+      !a.onGround && a.altitudeFt != null
+        ? `${Math.round(a.altitudeFt).toLocaleString()} ft`
+        : null,
+      a.groundSpeedKt != null ? `${Math.round(a.groundSpeedKt)} kt` : null,
+    ]
+      .filter(Boolean)
+      .join(" · ")
+    return (
+      <Marker
+        position={[a.latitude, a.longitude]}
+        icon={planeIcon(a.headingDeg, color, selected)}
+        eventHandlers={{ click: onToggle }}
+      >
+        <Tooltip direction="top" offset={[0, -16]} opacity={0.96} sticky className="plane-tooltip">
+          <div style={{ minWidth: 140, lineHeight: 1.35 }}>
+            <div
+              style={{
+                fontWeight: 700,
+                fontSize: 13,
+                fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+              }}
+            >
+              {hoverTitle}
+            </div>
+            {f && <div style={{ color: "#94a3b8", fontSize: 11 }}>{f.airlineName}</div>}
+            {hoverRoute && (
+              <div style={{ fontWeight: 600, fontSize: 12, marginTop: 2 }}>{hoverRoute}</div>
+            )}
+            {f && (
+              <div style={{ fontSize: 11, color: "#cbd5e1", marginTop: 2 }}>
+                {f.direction === "arrival" ? "Přistává " : "Odlétá "}
+                <strong>{fmtTime(f.actualTime ?? f.scheduledTime)}</strong>
+                {(() => {
+                  const m = minutesUntil(f.actualTime ?? f.scheduledTime)
+                  return m >= 0 ? ` (za ${m} min)` : ` (před ${-m} min)`
+                })()}
+              </div>
+            )}
+            {hoverMeta && (
+              <div
+                style={{
+                  fontSize: 11,
+                  color: "#cbd5e1",
+                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                  marginTop: 2,
+                }}
+              >
+                {hoverMeta}
+              </div>
+            )}
+            <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 4 }}>
+              {selected ? "Kliknutím skryješ trasu" : "Klikni pro trasu letu"}
+            </div>
+          </div>
+        </Tooltip>
+        <Popup autoClose={false} closeOnClick={false}>
+          <div style={{ minWidth: 200 }}>
+            <strong style={{ fontSize: 14 }}>{f?.number ?? a.callsign ?? a.icao24}</strong>
+            {f && (
+              <>
+                <br />
+                <span style={{ color: "#666" }}>{f.airlineName}</span>
+                <br />
+                <strong>
+                  {f.direction === "arrival"
+                    ? `${f.counterpart.city ?? f.counterpart.name} → Praha`
+                    : `Praha → ${f.counterpart.city ?? f.counterpart.name}`}
+                </strong>
+                <br />
+                {f.direction === "arrival" ? "Přistává:" : "Vzlétl:"}{" "}
+                <strong>{fmtTime(f.actualTime ?? f.scheduledTime)}</strong>
+                {f.direction === "arrival" && (
+                  <>
+                    {" "}
+                    ({(() => {
+                      const m = minutesUntil(f.actualTime ?? f.scheduledTime)
+                      return m >= 0 ? `za ${m} min` : `před ${-m} min`
+                    })()})
+                  </>
+                )}
+                <br />
+                Status: <strong>{f.status}</strong>
+                {f.terminal && <> {" · "}T{f.terminal}</>}
+                {f.gate && <> · Gate {f.gate}</>}
+                <br />
+              </>
+            )}
+            {(a.description ?? a.aircraftType) && (
+              <>
+                Typ: {a.description ?? a.aircraftType}
+                <br />
+              </>
+            )}
+            {a.registration && (
+              <>
+                Reg: {a.registration}
+                <br />
+              </>
+            )}
+            {a.altitudeFt != null && (
+              <>
+                Výška: {Math.round(a.altitudeFt).toLocaleString()} ft (
+                {Math.round(a.altitudeFt * 0.3048).toLocaleString()} m)
+                <br />
+              </>
+            )}
+            {a.groundSpeedKt != null && (
+              <>
+                Rychlost: {Math.round(a.groundSpeedKt)} kt ({Math.round(a.groundSpeedKt * 1.852)} km/h)
+                <br />
+              </>
+            )}
+            Vzdálenost od PRG: {Math.round(distKm)} km
+            <br />
+            {a.onGround ? "🟢 Na zemi" : "🛫 Ve vzduchu"}
+            {f && (
+              <>
+                <br />
+                <a
+                  href="#"
+                  style={{ color: accent, fontWeight: 600 }}
+                  onClick={(ev) => {
+                    ev.preventDefault()
+                    onOpenDetail(f)
+                  }}
+                >
+                  → Detail letu
+                </a>
+              </>
+            )}
+          </div>
+        </Popup>
+      </Marker>
+    )
+  },
+  eqAircraft,
+)
+PlaneMarker.displayName = "PlaneMarker"
 
 const MapController: React.FC<{ target: [number, number] | null }> = ({ target }) => {
   const map = useMap()
@@ -108,8 +290,10 @@ export const MapScreen: React.FC = () => {
     }
     loadAircraft()
     loadFlights()
-    // Refresh aircraft positions ~every second so movement is visible.
-    const id = setInterval(loadAircraft, 1_000)
+    // 3s strikes a balance between visible movement and adsb.lol update
+    // cadence (their feed refreshes ~every 5s — anything faster just hammers
+    // the API with duplicate data and trashes browser perf).
+    const id = setInterval(loadAircraft, 3_000)
     return () => {
       cancelled = true
       clearInterval(id)
@@ -208,21 +392,6 @@ export const MapScreen: React.FC = () => {
               : t.textMuted
             const selected = selectedIcao === a.icao24
             const counterCoords = f ? getAirportCoords(f.counterpart.iata) : null
-            // Compact summary shown on hover.
-            const hoverTitle = f?.number ?? a.callsign ?? a.icao24
-            const hoverRoute = f
-              ? f.direction === "arrival"
-                ? `${f.counterpart.iata ?? f.counterpart.name} → PRG`
-                : `PRG → ${f.counterpart.iata ?? f.counterpart.name}`
-              : a.callsign
-                ? "Tranzit"
-                : ""
-            const hoverMeta = [
-              !a.onGround && a.altitudeFt != null ? `${Math.round(a.altitudeFt).toLocaleString()} ft` : null,
-              a.groundSpeedKt != null ? `${Math.round(a.groundSpeedKt)} kt` : null,
-            ]
-              .filter(Boolean)
-              .join(" · ")
             return (
               <React.Fragment key={a.icao24}>
                 {selected && counterCoords && f && (
@@ -266,145 +435,18 @@ export const MapScreen: React.FC = () => {
                     </CircleMarker>
                   </>
                 )}
-                <Marker
-                  position={[a.latitude, a.longitude]}
-                  icon={planeIcon(a.headingDeg, color, selected)}
-                  eventHandlers={{
-                    click: () =>
-                      setSelectedIcao((prev) => (prev === a.icao24 ? null : a.icao24)),
-                  }}
-                >
-                  <Tooltip
-                    direction="top"
-                    offset={[0, -16]}
-                    opacity={0.96}
-                    sticky
-                    className="plane-tooltip"
-                  >
-                    <div style={{ minWidth: 140, lineHeight: 1.35 }}>
-                      <div style={{ fontWeight: 700, fontSize: 13, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>
-                        {hoverTitle}
-                      </div>
-                      {f && (
-                        <div style={{ color: "#94a3b8", fontSize: 11 }}>{f.airlineName}</div>
-                      )}
-                      {hoverRoute && (
-                        <div style={{ fontWeight: 600, fontSize: 12, marginTop: 2 }}>
-                          {hoverRoute}
-                        </div>
-                      )}
-                      {f && (
-                        <div style={{ fontSize: 11, color: "#cbd5e1", marginTop: 2 }}>
-                          {f.direction === "arrival" ? "Přistává " : "Odlétá "}
-                          <strong>{fmtTime(f.actualTime ?? f.scheduledTime)}</strong>
-                          {(() => {
-                            const m = minutesUntil(f.actualTime ?? f.scheduledTime)
-                            return m >= 0 ? ` (za ${m} min)` : ` (před ${-m} min)`
-                          })()}
-                        </div>
-                      )}
-                      {hoverMeta && (
-                        <div
-                          style={{
-                            fontSize: 11,
-                            color: "#cbd5e1",
-                            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-                            marginTop: 2,
-                          }}
-                        >
-                          {hoverMeta}
-                        </div>
-                      )}
-                      <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 4 }}>
-                        {selected ? "Kliknutím skryješ trasu" : "Klikni pro trasu letu"}
-                      </div>
-                    </div>
-                  </Tooltip>
-                  <Popup autoClose={false} closeOnClick={false}>
-                    <div style={{ minWidth: 200 }}>
-                      <strong style={{ fontSize: 14 }}>
-                        {f?.number ?? a.callsign ?? a.icao24}
-                      </strong>
-                      {f && (
-                        <>
-                          <br />
-                          <span style={{ color: "#666" }}>{f.airlineName}</span>
-                          <br />
-                          <strong>
-                            {f.direction === "arrival"
-                              ? `${f.counterpart.city ?? f.counterpart.name} → Praha`
-                              : `Praha → ${f.counterpart.city ?? f.counterpart.name}`}
-                          </strong>
-                          <br />
-                          {f.direction === "arrival" ? "Přistává:" : "Vzlétl:"}{" "}
-                          <strong>{fmtTime(f.actualTime ?? f.scheduledTime)}</strong>
-                          {f.direction === "arrival" && (
-                            <>
-                              {" "}
-                              ({(() => {
-                                const m = minutesUntil(f.actualTime ?? f.scheduledTime)
-                                return m >= 0 ? `za ${m} min` : `před ${-m} min`
-                            })()})
-                          </>
-                        )}
-                        <br />
-                        Status: <strong>{f.status}</strong>
-                        {f.terminal && (
-                          <>
-                            {" · "}T{f.terminal}
-                          </>
-                        )}
-                        {f.gate && <> · Gate {f.gate}</>}
-                        <br />
-                      </>
-                    )}
-                    {(a.description ?? a.aircraftType) && (
-                      <>
-                        Typ: {a.description ?? a.aircraftType}
-                        <br />
-                      </>
-                    )}
-                    {a.registration && (
-                      <>
-                        Reg: {a.registration}
-                        <br />
-                      </>
-                    )}
-                    {a.altitudeFt != null && (
-                      <>
-                        Výška: {Math.round(a.altitudeFt).toLocaleString()} ft (
-                        {Math.round(a.altitudeFt * 0.3048).toLocaleString()} m)
-                        <br />
-                      </>
-                    )}
-                    {a.groundSpeedKt != null && (
-                      <>
-                        Rychlost: {Math.round(a.groundSpeedKt)} kt (
-                        {Math.round(a.groundSpeedKt * 1.852)} km/h)
-                        <br />
-                      </>
-                    )}
-                    Vzdálenost od PRG: {Math.round(distKm)} km
-                    <br />
-                    {a.onGround ? "🟢 Na zemi" : "🛫 Ve vzduchu"}
-                    {f && (
-                      <>
-                        <br />
-                        <a
-                          href="#"
-                          style={{ color: t.accent, fontWeight: 600 }}
-                          onClick={(ev) => {
-                            ev.preventDefault()
-                            nav.navigate("FlightDetail", { flight: f })
-                          }}
-                        >
-                          → Detail letu
-                        </a>
-                      </>
-                    )}
-                  </div>
-                </Popup>
-                </Marker>
+                <PlaneMarker
+                  aircraft={a}
+                  flight={f}
+                  selected={selected}
+                  color={color}
+                  accent={t.accent}
+                  distKm={distKm}
+                  onToggle={() =>
+                    setSelectedIcao((prev) => (prev === a.icao24 ? null : a.icao24))
+                  }
+                  onOpenDetail={(ff) => nav.navigate("FlightDetail", { flight: ff })}
+                />
               </React.Fragment>
             )
           })}
