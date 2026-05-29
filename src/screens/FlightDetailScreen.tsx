@@ -112,7 +112,7 @@ export const FlightDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         <View style={[styles.card, { backgroundColor: t.card, borderColor: t.success, borderWidth: 2 }]}>
           <View style={styles.liveHeader}>
             <Text style={[styles.liveTitle, { color: t.success }]}>🛰️ LIVE poloha</Text>
-            <Pressable onPress={() => navigation.navigate("Map")}>
+            <Pressable onPress={() => navigation.navigate("Map", { focusFlightId: flight.id })}>
               <Text style={[styles.linkText, { color: t.accent }]}>Na mapu →</Text>
             </Pressable>
           </View>

@@ -14,7 +14,16 @@ import type { RootStackParamList } from "../navigation"
 import type { Flight, FlightDirection, FlightStatus } from "../types"
 import { fetchFlights } from "../api"
 import { useTheme, type Theme } from "../theme"
-import { StatusBadge, TimeDisplay, AirlineLogo } from "../components"
+import { StatusBadge, TimeDisplay, AirlineLogo, DelayBadge, DirectionalPlane } from "../components"
+import {
+  bearingDeg,
+  delayMinutes,
+  effectiveTime,
+  isTerminalStatus,
+  minutesUntil,
+  PRG_COORDS,
+} from "../utils"
+import { getAirportCoords } from "../airports"
 
 type Props = NativeStackScreenProps<RootStackParamList, "Flights">
 
@@ -31,18 +40,25 @@ const STATUSES: ("All" | FlightStatus)[] = [
 
 const IMMINENT_WINDOW_MS = 30 * 60 * 1000
 
-const minutesUntil = (iso: string): number => {
-  const t = new Date(iso).getTime()
-  if (Number.isNaN(t)) return Number.POSITIVE_INFINITY
-  return Math.round((t - Date.now()) / 60_000)
-}
-
 const isImminent = (f: Flight): boolean => {
-  if (f.status === "Arrived" || f.status === "Departed" || f.status === "Cancelled") return false
-  const eta = f.actualTime ?? f.scheduledTime
-  const diff = new Date(eta).getTime() - Date.now()
+  if (isTerminalStatus(f)) return false
+  const diff = Date.parse(effectiveTime(f)) - Date.now()
   return diff >= 0 && diff <= IMMINENT_WINDOW_MS
 }
+
+const bearingForFlight = (f: Flight): number | null => {
+  const c = getAirportCoords(f.counterpart.iata)
+  if (!c) return null
+  return f.direction === "arrival"
+    ? bearingDeg(c[0], c[1], PRG_COORDS[0], PRG_COORDS[1])
+    : bearingDeg(PRG_COORDS[0], PRG_COORDS[1], c[0], c[1])
+}
+
+type ListItem =
+  | { kind: "imminent-header"; direction: FlightDirection }
+  | { kind: "active-header"; count: number }
+  | { kind: "past-header"; count: number; expanded: boolean }
+  | { kind: "flight"; flight: Flight; imminent: boolean; muted?: boolean }
 
 export const FlightsScreen: React.FC<Props> = ({ navigation }) => {
   const t = useTheme()
@@ -53,6 +69,7 @@ export const FlightsScreen: React.FC<Props> = ({ navigation }) => {
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isMock, setIsMock] = useState(false)
+  const [pastExpanded, setPastExpanded] = useState(false)
 
   const load = useCallback(
     async (refresh = false) => {
@@ -79,12 +96,49 @@ export const FlightsScreen: React.FC<Props> = ({ navigation }) => {
     return () => clearInterval(id)
   }, [load])
 
-  const imminent = useMemo(() => flights.filter(isImminent).slice(0, 5), [flights])
+  // Reset "expanded past" whenever the user switches direction or filter.
+  useEffect(() => setPastExpanded(false), [direction, statusFilter])
 
   const filtered = useMemo(
     () => (statusFilter === "All" ? flights : flights.filter((f) => f.status === statusFilter)),
     [flights, statusFilter],
   )
+
+  const { imminent, active, past, delayedCount } = useMemo(() => {
+    const imminent = filtered.filter(isImminent)
+    const imminentIds = new Set(imminent.map((f) => f.id))
+    const active: Flight[] = []
+    const past: Flight[] = []
+    let delayedCount = 0
+    for (const f of filtered) {
+      if (delayMinutes(f) > 0 && !isTerminalStatus(f)) delayedCount++
+      if (imminentIds.has(f.id)) continue
+      if (isTerminalStatus(f)) past.push(f)
+      else active.push(f)
+    }
+    // Past list: most-recently-completed first.
+    past.sort((a, b) => effectiveTime(b).localeCompare(effectiveTime(a)))
+    return { imminent: imminent.slice(0, 5), active, past, delayedCount }
+  }, [filtered])
+
+  const listData = useMemo<ListItem[]>(() => {
+    const items: ListItem[] = []
+    if (imminent.length > 0) {
+      items.push({ kind: "imminent-header", direction })
+      for (const f of imminent) items.push({ kind: "flight", flight: f, imminent: true })
+    }
+    if (active.length > 0) {
+      items.push({ kind: "active-header", count: active.length })
+      for (const f of active) items.push({ kind: "flight", flight: f, imminent: false })
+    }
+    if (past.length > 0) {
+      items.push({ kind: "past-header", count: past.length, expanded: pastExpanded })
+      if (pastExpanded) {
+        for (const f of past) items.push({ kind: "flight", flight: f, imminent: false, muted: true })
+      }
+    }
+    return items
+  }, [imminent, active, past, direction, pastExpanded])
 
   return (
     <View style={[styles.container, { backgroundColor: t.bg }]}>
@@ -105,6 +159,28 @@ export const FlightsScreen: React.FC<Props> = ({ navigation }) => {
           )
         })}
       </View>
+
+      {/* Stats line */}
+      {flights.length > 0 && (
+        <View style={styles.statsRow}>
+          <Text style={[styles.statsText, { color: t.textMuted }]}>
+            <Text style={{ color: t.text, fontWeight: "600" }}>{active.length + imminent.length}</Text>{" "}
+            aktivních
+            {delayedCount > 0 && (
+              <>
+                {" · "}
+                <Text style={{ color: t.warning, fontWeight: "600" }}>{delayedCount}</Text> zpožděných
+              </>
+            )}
+            {past.length > 0 && (
+              <>
+                {" · "}
+                {past.length} dokončených
+              </>
+            )}
+          </Text>
+        </View>
+      )}
 
       {/* Status filter */}
       <ScrollView
@@ -149,8 +225,10 @@ export const FlightsScreen: React.FC<Props> = ({ navigation }) => {
         </View>
       ) : (
         <FlatList
-          data={filtered}
-          keyExtractor={(f) => f.id}
+          data={listData}
+          keyExtractor={(item, idx) =>
+            item.kind === "flight" ? `f-${item.flight.id}-${item.muted ? "p" : "a"}` : `h-${item.kind}-${idx}`
+          }
           contentContainerStyle={{ padding: 12, paddingBottom: 24 }}
           refreshControl={
             <RefreshControl
@@ -159,61 +237,64 @@ export const FlightsScreen: React.FC<Props> = ({ navigation }) => {
               tintColor={t.accent}
             />
           }
-          ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
+          ItemSeparatorComponent={({ leadingItem }: { leadingItem?: ListItem }) =>
+            leadingItem && leadingItem.kind === "flight" ? <View style={{ height: 8 }} /> : null
+          }
           ListEmptyComponent={
             <Text style={[styles.empty, { color: t.textMuted }]}>Žádné lety k zobrazení.</Text>
           }
-          ListHeaderComponent={
-            imminent.length > 0 ? (
-              <ImminentSection
-                flights={imminent}
+          renderItem={({ item }) => {
+            if (item.kind === "imminent-header") {
+              return (
+                <SectionHeader
+                  t={t}
+                  title={`⏰ ${item.direction === "arrival" ? "Brzy přilétají" : "Brzy odlétají"}`}
+                  subtitle="do 30 minut"
+                />
+              )
+            }
+            if (item.kind === "active-header") {
+              return <SectionHeader t={t} title="Aktivní" subtitle={`${item.count}`} compact />
+            }
+            if (item.kind === "past-header") {
+              return (
+                <Pressable
+                  onPress={() => setPastExpanded((v) => !v)}
+                  style={[styles.pastToggle, { borderColor: t.border, backgroundColor: t.card }]}
+                >
+                  <Text style={[styles.pastToggleText, { color: t.textMuted }]}>
+                    {item.expanded ? "▾" : "▸"} Přistálé / odlétlé / zrušené ({item.count})
+                  </Text>
+                </Pressable>
+              )
+            }
+            return (
+              <FlightRow
+                flight={item.flight}
                 direction={direction}
-                onPress={(f) => navigation.navigate("FlightDetail", { flight: f })}
+                imminent={item.imminent}
+                muted={item.muted}
+                onPress={() => navigation.navigate("FlightDetail", { flight: item.flight })}
+                onMap={() => navigation.navigate("Map", { focusFlightId: item.flight.id })}
                 t={t}
               />
-            ) : null
-          }
-          renderItem={({ item }) => (
-            <FlightRow
-              flight={item}
-              direction={direction}
-              imminent={isImminent(item)}
-              onPress={() => navigation.navigate("FlightDetail", { flight: item })}
-              t={t}
-            />
-          )}
+            )
+          }}
         />
       )}
     </View>
   )
 }
 
-const ImminentSection: React.FC<{
-  flights: Flight[]
-  direction: FlightDirection
-  onPress: (f: Flight) => void
+const SectionHeader: React.FC<{
   t: Theme
-}> = ({ flights, direction, onPress, t }) => (
-  <View style={{ marginBottom: 14 }}>
-    <View style={styles.sectionHeader}>
-      <Text style={[styles.sectionTitle, { color: t.text }]}>
-        ⏰ {direction === "arrival" ? "Brzy přilétají" : "Brzy odlétají"}
-      </Text>
-      <Text style={[styles.sectionSub, { color: t.textMuted }]}>do 30 minut</Text>
-    </View>
-    <View style={{ gap: 8 }}>
-      {flights.map((f) => (
-        <FlightRow
-          key={`imm-${f.id}`}
-          flight={f}
-          direction={direction}
-          imminent
-          onPress={() => onPress(f)}
-          t={t}
-        />
-      ))}
-    </View>
-    <View style={[styles.divider, { backgroundColor: t.border }]} />
+  title: string
+  subtitle?: string
+  compact?: boolean
+}> = ({ t, title, subtitle, compact }) => (
+  <View style={[styles.sectionHeader, compact && { marginTop: 4 }]}>
+    <Text style={[styles.sectionTitle, { color: t.text }]}>{title}</Text>
+    {subtitle && <Text style={[styles.sectionSub, { color: t.textMuted }]}>{subtitle}</Text>}
   </View>
 )
 
@@ -221,10 +302,13 @@ const FlightRow: React.FC<{
   flight: Flight
   direction: FlightDirection
   imminent: boolean
+  muted?: boolean
   onPress: () => void
+  onMap: () => void
   t: Theme
-}> = ({ flight, direction, imminent, onPress, t }) => {
-  const eta = minutesUntil(flight.actualTime ?? flight.scheduledTime)
+}> = ({ flight, direction, imminent, muted, onPress, onMap, t }) => {
+  const eta = minutesUntil(effectiveTime(flight))
+  const heading = bearingForFlight(flight)
   return (
     <Pressable
       onPress={onPress}
@@ -234,7 +318,7 @@ const FlightRow: React.FC<{
           backgroundColor: t.card,
           borderColor: imminent ? t.accent : t.border,
           borderWidth: imminent ? 2 : 1,
-          opacity: pressed ? 0.7 : 1,
+          opacity: pressed ? 0.7 : muted ? 0.65 : 1,
         },
       ]}
     >
@@ -254,19 +338,23 @@ const FlightRow: React.FC<{
             {flight.airlineName}
           </Text>
         </View>
-        <Text style={[styles.airport, { color: t.text }]} numberOfLines={1}>
-          {direction === "departure" ? "→ " : "← "}
-          {flight.counterpart.city ?? flight.counterpart.name}
-          {flight.counterpart.iata ? ` (${flight.counterpart.iata})` : ""}
-        </Text>
+        <View style={styles.routeRow}>
+          <DirectionalPlane headingDeg={heading} size={16} color={imminent ? t.accent : t.text} />
+          <Text style={[styles.airport, { color: t.text }]} numberOfLines={1}>
+            {direction === "departure" ? " " : " z "}
+            {flight.counterpart.city ?? flight.counterpart.name}
+            {flight.counterpart.iata ? ` (${flight.counterpart.iata})` : ""}
+          </Text>
+        </View>
         {!!flight.aircraftModel && (
           <Text style={[styles.aircraftLine, { color: t.textMuted }]} numberOfLines={1}>
             🛩  {flight.aircraftModel}
             {flight.aircraftReg ? ` · ${flight.aircraftReg}` : ""}
           </Text>
         )}
-        <View style={{ marginTop: 4 }}>
+        <View style={styles.statusRow}>
           <StatusBadge flight={flight} />
+          <DelayBadge flight={flight} threshold={15} />
         </View>
       </View>
       <View style={styles.cardRight}>
@@ -276,6 +364,19 @@ const FlightRow: React.FC<{
         {!!flight.gate && (
           <Text style={[styles.gateSub, { color: t.textMuted }]}>Gate {flight.gate}</Text>
         )}
+        <Pressable
+          hitSlop={8}
+          onPress={(e) => {
+            e.stopPropagation()
+            onMap()
+          }}
+          style={({ pressed }) => [
+            styles.mapBtn,
+            { borderColor: t.border, opacity: pressed ? 0.5 : 1 },
+          ]}
+        >
+          <Text style={{ fontSize: 14 }}>🗺️</Text>
+        </Pressable>
       </View>
     </Pressable>
   )
@@ -286,12 +387,15 @@ const styles = StyleSheet.create({
   toggle: {
     flexDirection: "row",
     margin: 12,
+    marginBottom: 6,
     borderRadius: 12,
     padding: 4,
     borderWidth: 1,
   },
   toggleBtn: { flex: 1, paddingVertical: 10, alignItems: "center", borderRadius: 9 },
   toggleText: { fontSize: 15, fontWeight: "600" },
+  statsRow: { paddingHorizontal: 14, paddingTop: 2, paddingBottom: 6 },
+  statsText: { fontSize: 12 },
   filterRow: { paddingHorizontal: 12, paddingBottom: 8, gap: 6, flexDirection: "row" },
   chip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, borderWidth: 1 },
   chipText: { fontSize: 13, fontWeight: "500" },
@@ -304,10 +408,19 @@ const styles = StyleSheet.create({
     alignItems: "baseline",
     justifyContent: "space-between",
     marginBottom: 8,
+    marginTop: 12,
   },
   sectionTitle: { fontSize: 16, fontWeight: "700" },
   sectionSub: { fontSize: 12 },
-  divider: { height: 1, marginTop: 14 },
+  pastToggle: {
+    marginTop: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    alignItems: "center",
+  },
+  pastToggleText: { fontSize: 13, fontWeight: "600" },
   card: {
     flexDirection: "row",
     padding: 12,
@@ -317,7 +430,7 @@ const styles = StyleSheet.create({
   },
   cardLeft: { minWidth: 78 },
   cardMiddle: { flex: 1 },
-  cardRight: { alignItems: "flex-end", minWidth: 56 },
+  cardRight: { alignItems: "flex-end", minWidth: 56, gap: 4 },
   flightNumber: { fontSize: 11, marginTop: 2 },
   etaPill: {
     marginTop: 6,
@@ -327,10 +440,21 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
   },
   etaPillText: { color: "#fff", fontSize: 10, fontWeight: "700" },
-  airport: { fontSize: 15, fontWeight: "600", marginTop: 4 },
+  routeRow: { flexDirection: "row", alignItems: "center", marginTop: 4 },
+  airport: { fontSize: 15, fontWeight: "600", flexShrink: 1 },
   airlineRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   airline: { fontSize: 12, flex: 1 },
   aircraftLine: { fontSize: 11, marginTop: 4 },
+  statusRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 6, flexWrap: "wrap" },
   gate: { fontSize: 14, fontWeight: "600" },
   gateSub: { fontSize: 11, marginTop: 2 },
+  mapBtn: {
+    marginTop: 4,
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
 })

@@ -34,7 +34,7 @@ export default function App() {
           options={({ navigation }) => ({
             title: "Letiště Praha (PRG)",
             headerRight: () => (
-              <Pressable onPress={() => navigation.navigate("Map")} hitSlop={10}>
+              <Pressable onPress={() => navigation.navigate("Map", undefined)} hitSlop={10}>
                 <Text style={{ fontSize: 18 }}>🗺️</Text>
               </Pressable>
             ),

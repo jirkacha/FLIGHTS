@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from "react"
 import { View, Text, ActivityIndicator, StyleSheet, useColorScheme } from "react-native"
-import { MapContainer, TileLayer, Marker, Popup, CircleMarker, Polyline } from "react-leaflet"
-import { useNavigation } from "@react-navigation/native"
+import { MapContainer, TileLayer, Marker, Popup, CircleMarker, Polyline, useMap } from "react-leaflet"
+import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native"
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack"
 import L from "leaflet"
 import "leaflet/dist/leaflet.css"
@@ -12,10 +12,10 @@ import { buildMatchMap } from "../matchFlights"
 import { getAirportCoords } from "../airports"
 import type { Flight } from "../types"
 import type { RootStackParamList } from "../navigation"
-
-const PRG_COORDS: [number, number] = [50.1008, 14.26]
+import { haversineKm, minutesUntil, PRG_COORDS, fmtTime } from "../utils"
 
 type Nav = NativeStackNavigationProp<RootStackParamList, "Map">
+type MapRoute = RouteProp<RootStackParamList, "Map">
 
 const planeIcon = (heading = 0, color = "#666", label?: string, selected = false) => {
   const size = selected ? 40 : 32
@@ -32,42 +32,25 @@ const planeIcon = (heading = 0, color = "#666", label?: string, selected = false
   })
 }
 
-const fmtTime = (iso?: string) => {
-  if (!iso) return "—"
-  try {
-    return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-  } catch {
-    return iso
-  }
-}
-
-const haversineKm = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
-  const R = 6371
-  const dLat = ((lat2 - lat1) * Math.PI) / 180
-  const dLon = ((lon2 - lon1) * Math.PI) / 180
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) ** 2
-  return R * 2 * Math.asin(Math.sqrt(a))
-}
-
-const minutesUntil = (iso: string): number => {
-  const t = new Date(iso).getTime()
-  if (Number.isNaN(t)) return Number.POSITIVE_INFINITY
-  return Math.round((t - Date.now()) / 60_000)
-}
-
 type Matched = {
   aircraft: LiveAircraft
   flight?: Flight
+}
+
+const MapController: React.FC<{ target: [number, number] | null }> = ({ target }) => {
+  const map = useMap()
+  useEffect(() => {
+    if (target) map.flyTo(target, Math.max(map.getZoom(), 8), { duration: 0.8 })
+  }, [target, map])
+  return null
 }
 
 export const MapScreen: React.FC = () => {
   const t = useTheme()
   const scheme = useColorScheme()
   const nav = useNavigation<Nav>()
+  const route = useRoute<MapRoute>()
+  const focusFlightId = route.params?.focusFlightId
   const [aircraft, setAircraft] = useState<LiveAircraft[]>([])
   const [flights, setFlights] = useState<{ arrivals: Flight[]; departures: Flight[] }>({
     arrivals: [],
@@ -77,6 +60,7 @@ export const MapScreen: React.FC = () => {
   const [error, setError] = useState<string | null>(null)
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
   const [selectedIcao, setSelectedIcao] = useState<string | null>(null)
+  const [flyTarget, setFlyTarget] = useState<[number, number] | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -109,6 +93,22 @@ export const MapScreen: React.FC = () => {
   }, [aircraft, flights])
 
   const matchedCount = useMemo(() => matched.filter((m) => m.flight).length, [matched])
+
+  // Auto-focus a flight passed via route params (e.g. tapping 🗺️ from the list).
+  useEffect(() => {
+    if (!focusFlightId) return
+    const hit = matched.find((m) => m.flight?.id === focusFlightId)
+    if (hit) {
+      setSelectedIcao(hit.aircraft.icao24)
+      setFlyTarget([hit.aircraft.latitude, hit.aircraft.longitude])
+      return
+    }
+    // Not airborne — fall back to the counterpart airport so the user sees something.
+    const all = [...flights.arrivals, ...flights.departures]
+    const f = all.find((x) => x.id === focusFlightId)
+    const c = f ? getAirportCoords(f.counterpart.iata) : null
+    if (c) setFlyTarget(c)
+  }, [focusFlightId, matched, flights])
 
   const tileUrl =
     scheme === "dark"
@@ -153,6 +153,7 @@ export const MapScreen: React.FC = () => {
           style={{ height: "100%", width: "100%" }}
           scrollWheelZoom
         >
+          <MapController target={flyTarget} />
           <TileLayer
             url={tileUrl}
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'

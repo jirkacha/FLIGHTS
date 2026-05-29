@@ -1,5 +1,6 @@
 import type { Flight, FlightDirection } from "./types"
 import { MOCK_FLIGHTS } from "./mockData"
+import { effectiveTime } from "./utils"
 
 const RAPIDAPI_KEY = process.env.EXPO_PUBLIC_RAPIDAPI_KEY ?? ""
 const HOST = "aerodatabox.p.rapidapi.com"
@@ -77,20 +78,22 @@ const fetchAll = async (): Promise<CacheEntry> => {
     }
   }
   const now = new Date()
-  const from = fmt(new Date(now.getTime() - 2 * 3600 * 1000))
-  const to = fmt(new Date(now.getTime() + 10 * 3600 * 1000))
+  // AeroDataBox allows max 12h window. Bias toward the past so long-delayed
+  // inbound flights (whose scheduled time is hours ago) still come back.
+  const from = fmt(new Date(now.getTime() - 8 * 3600 * 1000))
+  const to = fmt(new Date(now.getTime() + 4 * 3600 * 1000))
   const url = `https://${HOST}/flights/airports/iata/${AIRPORT_IATA}/${from}/${to}?direction=Both&withCancelled=true&withCodeshared=false&withCargo=false&withPrivate=false&withLocation=false`
   const res = await fetch(url, {
     headers: { "X-RapidAPI-Key": RAPIDAPI_KEY, "X-RapidAPI-Host": HOST },
   })
   if (!res.ok) throw new Error(`AeroDataBox ${res.status}: ${await res.text().catch(() => "")}`)
   const json = (await res.json()) as ApiResponse
-  const arrivals = (json.arrivals ?? [])
-    .map((m) => mapMovement(m, "arrival"))
-    .sort((a, b) => a.scheduledTime.localeCompare(b.scheduledTime))
+  const sortByEffective = (a: Flight, b: Flight) =>
+    effectiveTime(a).localeCompare(effectiveTime(b))
+  const arrivals = (json.arrivals ?? []).map((m) => mapMovement(m, "arrival")).sort(sortByEffective)
   const departures = (json.departures ?? [])
     .map((m) => mapMovement(m, "departure"))
-    .sort((a, b) => a.scheduledTime.localeCompare(b.scheduledTime))
+    .sort(sortByEffective)
   return { ts: Date.now(), arrivals, departures, isMock: false }
 }
 
