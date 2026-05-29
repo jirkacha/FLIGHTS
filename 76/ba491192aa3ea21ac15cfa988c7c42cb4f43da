@@ -1,0 +1,34 @@
+src/opensky.ts
+  s_365bf8e872cd9a::t_eacd85b5d35fd2 1-76
+App.tsx
+  s_365bf8e872cd9a::t_ae6fa154295810 5,9,13-23,28,34-41,48
+src/screens/FlightsScreen.tsx
+  s_365bf8e872cd9a::t_34f7f673f4e887 16,32-46,49,82-83,93,166-175,177-180,182-183,191-274,293-301,309,313-320
+package.json
+  s_365bf8e872cd9a::t_f5c8b6799791c5 9,12,15
+src/navigation.ts
+  s_365bf8e872cd9a::t_9e6f3dcac90600 6
+src/screens/MapScreen.tsx
+  s_365bf8e872cd9a::t_04ff02a6f776fc 1-35
+src/global.d.ts
+  s_365bf8e872cd9a::t_78506391731ed4 1
+src/screens/MapScreen.web.tsx
+  s_365bf8e872cd9a::t_48182a2c261be6 1-74,76-143
+  s_365bf8e872cd9a::t_22f96f6bc72565 75
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "76ba491192aa3ea21ac15cfa988c7c42cb4f43da",
+  "prompts": {},
+  "sessions": {
+    "s_365bf8e872cd9a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_190aa0706ffeJkcj653C1rtvIk",
+        "model": "claude-opus-4.7"
+      },
+      "human_author": "unknown"
+    }
+  }
+}
