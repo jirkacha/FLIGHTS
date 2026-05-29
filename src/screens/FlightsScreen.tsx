@@ -13,7 +13,7 @@ import type { NativeStackScreenProps } from "@react-navigation/native-stack"
 import type { RootStackParamList } from "../navigation"
 import type { Flight, FlightDirection, FlightStatus } from "../types"
 import { fetchFlights } from "../api"
-import { useTheme } from "../theme"
+import { useTheme, type Theme } from "../theme"
 import { StatusBadge, TimeDisplay } from "../components"
 
 type Props = NativeStackScreenProps<RootStackParamList, "Flights">
@@ -29,9 +29,24 @@ const STATUSES: ("All" | FlightStatus)[] = [
   "Departed",
 ]
 
+const IMMINENT_WINDOW_MS = 30 * 60 * 1000
+
+const minutesUntil = (iso: string): number => {
+  const t = new Date(iso).getTime()
+  if (Number.isNaN(t)) return Number.POSITIVE_INFINITY
+  return Math.round((t - Date.now()) / 60_000)
+}
+
+const isImminent = (f: Flight): boolean => {
+  if (f.status === "Arrived" || f.status === "Departed" || f.status === "Cancelled") return false
+  const eta = f.actualTime ?? f.scheduledTime
+  const diff = new Date(eta).getTime() - Date.now()
+  return diff >= 0 && diff <= IMMINENT_WINDOW_MS
+}
+
 export const FlightsScreen: React.FC<Props> = ({ navigation }) => {
   const t = useTheme()
-  const [direction, setDirection] = useState<FlightDirection>("departure")
+  const [direction, setDirection] = useState<FlightDirection>("arrival")
   const [statusFilter, setStatusFilter] = useState<"All" | FlightStatus>("All")
   const [flights, setFlights] = useState<Flight[]>([])
   const [loading, setLoading] = useState(false)
@@ -64,6 +79,8 @@ export const FlightsScreen: React.FC<Props> = ({ navigation }) => {
     return () => clearInterval(id)
   }, [load])
 
+  const imminent = useMemo(() => flights.filter(isImminent).slice(0, 5), [flights])
+
   const filtered = useMemo(
     () => (statusFilter === "All" ? flights : flights.filter((f) => f.status === statusFilter)),
     [flights, statusFilter],
@@ -73,7 +90,7 @@ export const FlightsScreen: React.FC<Props> = ({ navigation }) => {
     <View style={[styles.container, { backgroundColor: t.bg }]}>
       {/* Direction toggle */}
       <View style={[styles.toggle, { backgroundColor: t.card, borderColor: t.border }]}>
-        {(["departure", "arrival"] as FlightDirection[]).map((d) => {
+        {(["arrival", "departure"] as FlightDirection[]).map((d) => {
           const active = direction === d
           return (
             <Pressable
@@ -146,48 +163,112 @@ export const FlightsScreen: React.FC<Props> = ({ navigation }) => {
           ListEmptyComponent={
             <Text style={[styles.empty, { color: t.textMuted }]}>Žádné lety k zobrazení.</Text>
           }
+          ListHeaderComponent={
+            imminent.length > 0 ? (
+              <ImminentSection
+                flights={imminent}
+                direction={direction}
+                onPress={(f) => navigation.navigate("FlightDetail", { flight: f })}
+                t={t}
+              />
+            ) : null
+          }
           renderItem={({ item }) => (
-            <Pressable
+            <FlightRow
+              flight={item}
+              direction={direction}
+              imminent={isImminent(item)}
               onPress={() => navigation.navigate("FlightDetail", { flight: item })}
-              style={({ pressed }) => [
-                styles.card,
-                {
-                  backgroundColor: t.card,
-                  borderColor: t.border,
-                  opacity: pressed ? 0.7 : 1,
-                },
-              ]}
-            >
-              <View style={styles.cardLeft}>
-                <TimeDisplay flight={item} />
-                <Text style={[styles.flightNumber, { color: t.textMuted }]}>{item.number}</Text>
-              </View>
-              <View style={styles.cardMiddle}>
-                <Text style={[styles.airport, { color: t.text }]} numberOfLines={1}>
-                  {direction === "departure" ? "→ " : "← "}
-                  {item.counterpart.city ?? item.counterpart.name}
-                  {item.counterpart.iata ? ` (${item.counterpart.iata})` : ""}
-                </Text>
-                <Text style={[styles.airline, { color: t.textMuted }]} numberOfLines={1}>
-                  {item.airlineName}
-                </Text>
-                <View style={{ marginTop: 4 }}>
-                  <StatusBadge flight={item} />
-                </View>
-              </View>
-              <View style={styles.cardRight}>
-                {!!item.terminal && (
-                  <Text style={[styles.gate, { color: t.text }]}>T{item.terminal}</Text>
-                )}
-                {!!item.gate && (
-                  <Text style={[styles.gateSub, { color: t.textMuted }]}>Gate {item.gate}</Text>
-                )}
-              </View>
-            </Pressable>
+              t={t}
+            />
           )}
         />
       )}
     </View>
+  )
+}
+
+const ImminentSection: React.FC<{
+  flights: Flight[]
+  direction: FlightDirection
+  onPress: (f: Flight) => void
+  t: Theme
+}> = ({ flights, direction, onPress, t }) => (
+  <View style={{ marginBottom: 14 }}>
+    <View style={styles.sectionHeader}>
+      <Text style={[styles.sectionTitle, { color: t.text }]}>
+        ⏰ {direction === "arrival" ? "Brzy přilétají" : "Brzy odlétají"}
+      </Text>
+      <Text style={[styles.sectionSub, { color: t.textMuted }]}>do 30 minut</Text>
+    </View>
+    <View style={{ gap: 8 }}>
+      {flights.map((f) => (
+        <FlightRow
+          key={`imm-${f.id}`}
+          flight={f}
+          direction={direction}
+          imminent
+          onPress={() => onPress(f)}
+          t={t}
+        />
+      ))}
+    </View>
+    <View style={[styles.divider, { backgroundColor: t.border }]} />
+  </View>
+)
+
+const FlightRow: React.FC<{
+  flight: Flight
+  direction: FlightDirection
+  imminent: boolean
+  onPress: () => void
+  t: Theme
+}> = ({ flight, direction, imminent, onPress, t }) => {
+  const eta = minutesUntil(flight.actualTime ?? flight.scheduledTime)
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.card,
+        {
+          backgroundColor: t.card,
+          borderColor: imminent ? t.accent : t.border,
+          borderWidth: imminent ? 2 : 1,
+          opacity: pressed ? 0.7 : 1,
+        },
+      ]}
+    >
+      <View style={styles.cardLeft}>
+        <TimeDisplay flight={flight} />
+        <Text style={[styles.flightNumber, { color: t.textMuted }]}>{flight.number}</Text>
+        {imminent && eta >= 0 && (
+          <View style={[styles.etaPill, { backgroundColor: t.accent }]}>
+            <Text style={styles.etaPillText}>za {eta} min</Text>
+          </View>
+        )}
+      </View>
+      <View style={styles.cardMiddle}>
+        <Text style={[styles.airport, { color: t.text }]} numberOfLines={1}>
+          {direction === "departure" ? "→ " : "← "}
+          {flight.counterpart.city ?? flight.counterpart.name}
+          {flight.counterpart.iata ? ` (${flight.counterpart.iata})` : ""}
+        </Text>
+        <Text style={[styles.airline, { color: t.textMuted }]} numberOfLines={1}>
+          {flight.airlineName}
+        </Text>
+        <View style={{ marginTop: 4 }}>
+          <StatusBadge flight={flight} />
+        </View>
+      </View>
+      <View style={styles.cardRight}>
+        {!!flight.terminal && (
+          <Text style={[styles.gate, { color: t.text }]}>T{flight.terminal}</Text>
+        )}
+        {!!flight.gate && (
+          <Text style={[styles.gateSub, { color: t.textMuted }]}>Gate {flight.gate}</Text>
+        )}
+      </View>
+    </Pressable>
   )
 }
 
@@ -209,18 +290,34 @@ const styles = StyleSheet.create({
   bannerText: { color: "#fff", fontSize: 12, fontWeight: "500" },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
   empty: { textAlign: "center", marginTop: 40 },
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+  sectionTitle: { fontSize: 16, fontWeight: "700" },
+  sectionSub: { fontSize: 12 },
+  divider: { height: 1, marginTop: 14 },
   card: {
     flexDirection: "row",
     padding: 12,
     borderRadius: 12,
-    borderWidth: 1,
     gap: 12,
     alignItems: "center",
   },
-  cardLeft: { minWidth: 70 },
+  cardLeft: { minWidth: 78 },
   cardMiddle: { flex: 1 },
   cardRight: { alignItems: "flex-end", minWidth: 56 },
   flightNumber: { fontSize: 11, marginTop: 2 },
+  etaPill: {
+    marginTop: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 999,
+    alignSelf: "flex-start",
+  },
+  etaPillText: { color: "#fff", fontSize: 10, fontWeight: "700" },
   airport: { fontSize: 15, fontWeight: "600" },
   airline: { fontSize: 12, marginTop: 2 },
   gate: { fontSize: 14, fontWeight: "600" },
