@@ -14,14 +14,15 @@ import { useNavigation, useRoute, type RouteProp } from "@react-navigation/nativ
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack"
 import L from "leaflet"
 import "leaflet/dist/leaflet.css"
-import { useTheme } from "../theme"
+import { useTheme, statusColor, type Theme } from "../theme"
 import { fetchLiveAircraft, type LiveAircraft } from "../opensky"
 import { fetchAllFlights } from "../api"
 import { buildMatchMap } from "../matchFlights"
 import { getAirportCoords } from "../airports"
+import { AirlineLogo } from "../components"
 import type { Flight } from "../types"
 import type { RootStackParamList } from "../navigation"
-import { haversineKm, minutesUntil, PRG_COORDS, fmtTime } from "../utils"
+import { haversineKm, minutesUntil, PRG_COORDS, fmtTime, fmtDateShort } from "../utils"
 
 type Nav = NativeStackNavigationProp<RootStackParamList, "Map">
 type MapRoute = RouteProp<RootStackParamList, "Map">
@@ -34,8 +35,7 @@ const PLANE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" w
 const ICON_CACHE = new Map<string, L.DivIcon>()
 
 const planeIcon = (heading = 0, color = "#666", selected = false) => {
-  // Round heading to 5° buckets so neighboring values share an icon and we
-  // don't churn through 360 distinct cache entries while a plane turns.
+  // 5° buckets keep cache small while the plane turns.
   const h = Math.round(heading / 5) * 5
   const key = `${h}-${color}-${selected}`
   const cached = ICON_CACHE.get(key)
@@ -76,30 +76,19 @@ type PlaneMarkerProps = {
   flight?: Flight
   selected: boolean
   color: string
-  accent: string
-  distKm: number
   onToggle: () => void
-  onOpenDetail: (f: Flight) => void
 }
 
 const PlaneMarker: React.FC<PlaneMarkerProps> = React.memo(
-  ({ aircraft: a, flight: f, selected, color, accent, distKm, onToggle, onOpenDetail }) => {
+  ({ aircraft: a, flight: f, selected, color, onToggle }) => {
     const hoverTitle = f?.number ?? a.callsign ?? a.icao24
     const hoverRoute = f
       ? f.direction === "arrival"
-        ? `${f.counterpart.iata ?? f.counterpart.name} → PRG`
-        : `PRG → ${f.counterpart.iata ?? f.counterpart.name}`
+        ? `${f.counterpart.iata ?? f.counterpart.city ?? f.counterpart.name} → PRG`
+        : `PRG → ${f.counterpart.iata ?? f.counterpart.city ?? f.counterpart.name}`
       : a.callsign
         ? "Tranzit"
         : ""
-    const hoverMeta = [
-      !a.onGround && a.altitudeFt != null
-        ? `${Math.round(a.altitudeFt).toLocaleString()} ft`
-        : null,
-      a.groundSpeedKt != null ? `${Math.round(a.groundSpeedKt)} kt` : null,
-    ]
-      .filter(Boolean)
-      .join(" · ")
     return (
       <Marker
         position={[a.latitude, a.longitude]}
@@ -107,122 +96,51 @@ const PlaneMarker: React.FC<PlaneMarkerProps> = React.memo(
         eventHandlers={{ click: onToggle }}
       >
         <Tooltip direction="top" offset={[0, -16]} opacity={0.96} sticky className="plane-tooltip">
-          <div style={{ minWidth: 140, lineHeight: 1.35 }}>
+          <div style={{ minWidth: 130, lineHeight: 1.35 }}>
             <div
               style={{
-                fontWeight: 700,
+                fontWeight: 800,
                 fontSize: 13,
                 fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                letterSpacing: 0.3,
               }}
             >
               {hoverTitle}
             </div>
-            {f && <div style={{ color: "#94a3b8", fontSize: 11 }}>{f.airlineName}</div>}
+            {f && <div style={{ color: "#cbd5e1", fontSize: 11 }}>{f.airlineName}</div>}
             {hoverRoute && (
-              <div style={{ fontWeight: 600, fontSize: 12, marginTop: 2 }}>{hoverRoute}</div>
+              <div style={{ fontWeight: 700, fontSize: 12, marginTop: 3 }}>{hoverRoute}</div>
             )}
             {f && (
               <div style={{ fontSize: 11, color: "#cbd5e1", marginTop: 2 }}>
-                {f.direction === "arrival" ? "Přistává " : "Odlétá "}
+                {f.direction === "arrival" ? "Přílet " : "Odlet "}
                 <strong>{fmtTime(f.actualTime ?? f.scheduledTime)}</strong>
                 {(() => {
                   const m = minutesUntil(f.actualTime ?? f.scheduledTime)
-                  return m >= 0 ? ` (za ${m} min)` : ` (před ${-m} min)`
+                  return m >= 0 ? ` · za ${m} min` : ` · před ${-m} min`
                 })()}
               </div>
             )}
-            {hoverMeta && (
-              <div
-                style={{
-                  fontSize: 11,
-                  color: "#cbd5e1",
-                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-                  marginTop: 2,
-                }}
-              >
-                {hoverMeta}
-              </div>
-            )}
             <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 4 }}>
-              {selected ? "Kliknutím skryješ trasu" : "Klikni pro trasu letu"}
+              Klikni pro detail →
             </div>
           </div>
         </Tooltip>
+        {/* Popup zůstává jako fallback (např. pro mobilní web bez side panelu).
+            Plný detail je v levém SelectedFlightPanel. */}
         <Popup autoClose={false} closeOnClick={false}>
-          <div style={{ minWidth: 200 }}>
-            <strong style={{ fontSize: 14 }}>{f?.number ?? a.callsign ?? a.icao24}</strong>
+          <div style={{ minWidth: 180, fontSize: 12 }}>
+            <strong style={{ fontSize: 14 }}>{hoverTitle}</strong>
             {f && (
               <>
                 <br />
                 <span style={{ color: "#666" }}>{f.airlineName}</span>
                 <br />
-                <strong>
-                  {f.direction === "arrival"
-                    ? `${f.counterpart.city ?? f.counterpart.name} → Praha`
-                    : `Praha → ${f.counterpart.city ?? f.counterpart.name}`}
-                </strong>
-                <br />
-                {f.direction === "arrival" ? "Přistává:" : "Vzlétl:"}{" "}
-                <strong>{fmtTime(f.actualTime ?? f.scheduledTime)}</strong>
-                {f.direction === "arrival" && (
-                  <>
-                    {" "}
-                    ({(() => {
-                      const m = minutesUntil(f.actualTime ?? f.scheduledTime)
-                      return m >= 0 ? `za ${m} min` : `před ${-m} min`
-                    })()})
-                  </>
-                )}
-                <br />
-                Status: <strong>{f.status}</strong>
-                {f.terminal && <> {" · "}T{f.terminal}</>}
-                {f.gate && <> · Gate {f.gate}</>}
-                <br />
+                <strong>{hoverRoute}</strong>
               </>
             )}
-            {(a.description ?? a.aircraftType) && (
-              <>
-                Typ: {a.description ?? a.aircraftType}
-                <br />
-              </>
-            )}
-            {a.registration && (
-              <>
-                Reg: {a.registration}
-                <br />
-              </>
-            )}
-            {a.altitudeFt != null && (
-              <>
-                Výška: {Math.round(a.altitudeFt).toLocaleString()} ft (
-                {Math.round(a.altitudeFt * 0.3048).toLocaleString()} m)
-                <br />
-              </>
-            )}
-            {a.groundSpeedKt != null && (
-              <>
-                Rychlost: {Math.round(a.groundSpeedKt)} kt ({Math.round(a.groundSpeedKt * 1.852)} km/h)
-                <br />
-              </>
-            )}
-            Vzdálenost od PRG: {Math.round(distKm)} km
             <br />
             {a.onGround ? "🟢 Na zemi" : "🛫 Ve vzduchu"}
-            {f && (
-              <>
-                <br />
-                <a
-                  href="#"
-                  style={{ color: accent, fontWeight: 600 }}
-                  onClick={(ev) => {
-                    ev.preventDefault()
-                    onOpenDetail(f)
-                  }}
-                >
-                  → Detail letu
-                </a>
-              </>
-            )}
           </div>
         </Popup>
       </Marker>
@@ -234,9 +152,6 @@ PlaneMarker.displayName = "PlaneMarker"
 
 const MapController: React.FC<{ target: [number, number] | null }> = ({ target }) => {
   const map = useMap()
-  // Leaflet sometimes mounts with zero size when its container is inside a
-  // flex layout — force a recompute shortly after mount so it actually
-  // centers on PRG instead of drifting into the ocean.
   useEffect(() => {
     const id = window.setTimeout(() => map.invalidateSize(), 200)
     return () => window.clearTimeout(id)
@@ -246,6 +161,295 @@ const MapController: React.FC<{ target: [number, number] | null }> = ({ target }
   }, [target, map])
   return null
 }
+
+// --- Side panel ------------------------------------------------------------
+
+const SelectedFlightPanel: React.FC<{
+  aircraft: LiveAircraft
+  flight?: Flight
+  t: Theme
+  onClose: () => void
+  onOpenDetail: (f: Flight) => void
+}> = ({ aircraft: a, flight: f, t, onClose, onOpenDetail }) => {
+  const distKm = haversineKm(PRG_COORDS[0], PRG_COORDS[1], a.latitude, a.longitude)
+  const eta =
+    f && !a.onGround ? minutesUntil(f.actualTime ?? f.scheduledTime) : null
+  const counter = f?.counterpart
+  const counterLabel = counter
+    ? counter.iata
+      ? `${counter.city ?? counter.name} (${counter.iata})`
+      : (counter.city ?? counter.name)
+    : null
+  const statusBadgeColor = f ? statusColor(f.status, t) : t.textMuted
+  const verticalArrow =
+    a.verticalRateFpm != null && Math.abs(a.verticalRateFpm) >= 200
+      ? a.verticalRateFpm > 0
+        ? "↑"
+        : "↓"
+      : ""
+
+  return (
+    <View style={[panelStyles.panel, { backgroundColor: t.card, borderColor: t.border }]}>
+      {/* Header */}
+      <View style={panelStyles.header}>
+        <View style={{ flex: 1 }}>
+          <View style={panelStyles.headerRow}>
+            {f && <AirlineLogo iata={f.airlineIata} size={28} />}
+            <Text style={[panelStyles.flightNo, { color: t.accent, fontFamily: t.mono }]}>
+              {f?.number ?? a.callsign ?? a.icao24}
+            </Text>
+            {f && (
+              <View style={[panelStyles.statusPill, { borderColor: statusBadgeColor }]}>
+                <Text style={[panelStyles.statusPillText, { color: statusBadgeColor }]}>
+                  {f.status}
+                </Text>
+              </View>
+            )}
+          </View>
+          {f ? (
+            <Text style={[panelStyles.airline, { color: t.textMuted }]}>{f.airlineName}</Text>
+          ) : (
+            <Text style={[panelStyles.airline, { color: t.textMuted }]}>
+              Tranzit · ADS-B {a.icao24}
+            </Text>
+          )}
+        </View>
+        <Pressable
+          onPress={onClose}
+          hitSlop={8}
+          style={({ pressed }) => [
+            panelStyles.closeBtn,
+            { borderColor: t.border, opacity: pressed ? 0.5 : 1 },
+          ]}
+        >
+          <Text style={{ color: t.textMuted, fontSize: 16, lineHeight: 16 }}>✕</Text>
+        </Pressable>
+      </View>
+
+      {/* Route */}
+      {f && counterLabel && (
+        <View style={[panelStyles.routeBlock, { backgroundColor: t.cardTint, borderColor: t.border }]}>
+          <View style={panelStyles.routeRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={[panelStyles.routeLabel, { color: t.textMuted }]}>
+                {f.direction === "arrival" ? "Z" : "Praha"}
+              </Text>
+              <Text style={[panelStyles.routePlace, { color: t.text }]} numberOfLines={1}>
+                {f.direction === "arrival" ? counterLabel : "Praha (PRG)"}
+              </Text>
+            </View>
+            <Text style={[panelStyles.routeArrow, { color: t.accent }]}>→</Text>
+            <View style={{ flex: 1, alignItems: "flex-end" }}>
+              <Text style={[panelStyles.routeLabel, { color: t.textMuted }]}>
+                {f.direction === "arrival" ? "Praha" : "Do"}
+              </Text>
+              <Text
+                style={[panelStyles.routePlace, { color: t.text, textAlign: "right" }]}
+                numberOfLines={1}
+              >
+                {f.direction === "arrival" ? "Praha (PRG)" : counterLabel}
+              </Text>
+            </View>
+          </View>
+        </View>
+      )}
+
+      {/* Time block */}
+      {f && (
+        <View style={panelStyles.timeBlock}>
+          <View style={panelStyles.timeRow}>
+            <Text style={[panelStyles.timeLabel, { color: t.textMuted }]}>
+              {f.direction === "arrival" ? "Přílet:" : "Odlet:"}
+            </Text>
+            <View style={panelStyles.timeValues}>
+              {f.actualTime ? (
+                <>
+                  <Text
+                    style={[
+                      panelStyles.timeSched,
+                      { color: t.textMuted, fontFamily: t.mono },
+                    ]}
+                  >
+                    {fmtTime(f.scheduledTime)}
+                  </Text>
+                  <Text
+                    style={[
+                      panelStyles.timeActual,
+                      { color: t.text, fontFamily: t.mono },
+                    ]}
+                  >
+                    {fmtTime(f.actualTime)}
+                  </Text>
+                </>
+              ) : (
+                <Text style={[panelStyles.timeActual, { color: t.text, fontFamily: t.mono }]}>
+                  {fmtTime(f.scheduledTime)}
+                </Text>
+              )}
+              <Text style={[panelStyles.timeDate, { color: t.textMuted, fontFamily: t.mono }]}>
+                {fmtDateShort(f.actualTime ?? f.scheduledTime)}
+              </Text>
+            </View>
+          </View>
+          {eta != null && (
+            <Text style={[panelStyles.etaText, { color: t.accent }]}>
+              {eta >= 0 ? `za ${eta} min` : `před ${-eta} min`}
+            </Text>
+          )}
+          {(f.terminal || f.gate) && (
+            <View style={panelStyles.metaRow}>
+              {f.terminal && (
+                <Text style={[panelStyles.metaText, { color: t.text }]}>T{f.terminal}</Text>
+              )}
+              {f.gate && (
+                <Text style={[panelStyles.metaText, { color: t.textMuted }]}>
+                  Gate {f.gate}
+                </Text>
+              )}
+            </View>
+          )}
+        </View>
+      )}
+
+      {/* Live ADS-B data */}
+      <View style={[panelStyles.liveBlock, { borderColor: t.border }]}>
+        <Text style={[panelStyles.sectionLabel, { color: t.textMuted }]}>LIVE DATA</Text>
+        <View style={panelStyles.liveGrid}>
+          <LiveStat
+            label="Stav"
+            value={a.onGround ? "Na zemi" : "Ve vzduchu"}
+            t={t}
+          />
+          {a.altitudeFt != null && !a.onGround && (
+            <LiveStat
+              label="Výška"
+              value={`${Math.round(a.altitudeFt).toLocaleString()} ft ${verticalArrow}`.trim()}
+              sub={`${Math.round(a.altitudeFt * 0.3048).toLocaleString()} m`}
+              t={t}
+            />
+          )}
+          {a.groundSpeedKt != null && (
+            <LiveStat
+              label="Rychlost"
+              value={`${Math.round(a.groundSpeedKt)} kt`}
+              sub={`${Math.round(a.groundSpeedKt * 1.852)} km/h`}
+              t={t}
+            />
+          )}
+          <LiveStat
+            label="Vzdálenost"
+            value={`${Math.round(distKm)} km`}
+            sub="od PRG"
+            t={t}
+          />
+          {(a.description ?? a.aircraftType) && (
+            <LiveStat label="Typ" value={(a.description ?? a.aircraftType)!} t={t} wide />
+          )}
+          {a.registration && <LiveStat label="Registrace" value={a.registration} t={t} />}
+        </View>
+      </View>
+
+      {f && (
+        <Pressable
+          onPress={() => onOpenDetail(f)}
+          style={({ pressed }) => [
+            panelStyles.detailBtn,
+            { backgroundColor: t.accent, opacity: pressed ? 0.8 : 1 },
+          ]}
+        >
+          <Text style={panelStyles.detailBtnText}>Detail letu →</Text>
+        </Pressable>
+      )}
+    </View>
+  )
+}
+
+const LiveStat: React.FC<{
+  label: string
+  value: string
+  sub?: string
+  t: Theme
+  wide?: boolean
+}> = ({ label, value, sub, t, wide }) => (
+  <View style={[panelStyles.statBox, wide && { flexBasis: "100%" }]}>
+    <Text style={[panelStyles.statLabel, { color: t.textMuted }]}>{label}</Text>
+    <Text style={[panelStyles.statValue, { color: t.text, fontFamily: t.mono }]}>{value}</Text>
+    {sub && <Text style={[panelStyles.statSub, { color: t.textMuted }]}>{sub}</Text>}
+  </View>
+)
+
+const panelStyles = StyleSheet.create({
+  panel: {
+    position: "absolute",
+    top: 12,
+    left: 12,
+    width: 340,
+    maxHeight: "calc(100% - 24px)" as unknown as number,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 14,
+    gap: 12,
+    zIndex: 1100,
+    shadowColor: "#000",
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    overflow: "hidden",
+  },
+  header: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
+  headerRow: { flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" },
+  flightNo: { fontSize: 18, fontWeight: "800", letterSpacing: 0.5 },
+  airline: { fontSize: 12, fontWeight: "500", marginTop: 4 },
+  closeBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  statusPill: {
+    borderWidth: 1.5,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 1,
+  },
+  statusPillText: { fontSize: 10, fontWeight: "700", letterSpacing: 0.3 },
+
+  routeBlock: { borderRadius: 8, borderWidth: 1, padding: 10 },
+  routeRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  routeLabel: { fontSize: 10, fontWeight: "600", letterSpacing: 0.5, marginBottom: 2 },
+  routePlace: { fontSize: 14, fontWeight: "700" },
+  routeArrow: { fontSize: 18, fontWeight: "700" },
+
+  timeBlock: { gap: 6 },
+  timeRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  timeLabel: { fontSize: 12, fontWeight: "600" },
+  timeValues: { flexDirection: "row", alignItems: "baseline", gap: 8 },
+  timeSched: { fontSize: 12, textDecorationLine: "line-through" },
+  timeActual: { fontSize: 18, fontWeight: "800", letterSpacing: 0.3 },
+  timeDate: { fontSize: 11, fontWeight: "600" },
+  etaText: { fontSize: 13, fontWeight: "700", textAlign: "right" },
+  metaRow: { flexDirection: "row", gap: 10, marginTop: 2 },
+  metaText: { fontSize: 12, fontWeight: "600" },
+
+  liveBlock: { borderTopWidth: 1, paddingTop: 10, gap: 8 },
+  sectionLabel: { fontSize: 10, fontWeight: "700", letterSpacing: 1 },
+  liveGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  statBox: { flexBasis: "47%", flexGrow: 1, minWidth: 100 },
+  statLabel: { fontSize: 10, fontWeight: "600", letterSpacing: 0.4, marginBottom: 2 },
+  statValue: { fontSize: 14, fontWeight: "700" },
+  statSub: { fontSize: 10, fontWeight: "500", marginTop: 1 },
+
+  detailBtn: {
+    borderRadius: 999,
+    paddingVertical: 10,
+    alignItems: "center",
+  },
+  detailBtnText: { color: "#fff", fontSize: 13, fontWeight: "700", letterSpacing: 0.3 },
+})
+
+// --- Main screen -----------------------------------------------------------
 
 export const MapScreen: React.FC = () => {
   const t = useTheme()
@@ -287,14 +491,11 @@ export const MapScreen: React.FC = () => {
         if (cancelled) return
         setFlights({ arrivals: fl.arrivals, departures: fl.departures })
       } catch {
-        /* non-fatal — flights enrich the icons but the map still works */
+        /* non-fatal */
       }
     }
     loadAircraft()
     loadFlights()
-    // 3s strikes a balance between visible movement and adsb.lol update
-    // cadence (their feed refreshes ~every 5s — anything faster just hammers
-    // the API with duplicate data and trashes browser perf).
     const id = setInterval(loadAircraft, 3_000)
     return () => {
       cancelled = true
@@ -310,10 +511,6 @@ export const MapScreen: React.FC = () => {
 
   const matchedCount = useMemo(() => matched.filter((m) => m.flight).length, [matched])
 
-  // Auto-focus a flight passed via route params (e.g. tapping 🗺️ from the list).
-  // If the flight isn't in ADS-B (out of range / on ground at a distant airport),
-  // we DON'T pan to the counterpart airport — that's the bug the user reported.
-  // We just stay at PRG and let them know the plane isn't visible.
   useEffect(() => {
     if (!focusFlightId) return
     const hit = matched.find((m) => m.flight?.id === focusFlightId)
@@ -322,6 +519,11 @@ export const MapScreen: React.FC = () => {
       setFlyTarget([hit.aircraft.latitude, hit.aircraft.longitude])
     }
   }, [focusFlightId, matched])
+
+  const selectedMatched = useMemo(
+    () => matched.find((m) => m.aircraft.icao24 === selectedIcao),
+    [matched, selectedIcao],
+  )
 
   const tileConfig = useMemo(() => {
     if (satellite) {
@@ -347,7 +549,7 @@ export const MapScreen: React.FC = () => {
   return (
     <View style={[styles.container, { backgroundColor: t.bg }]}>
       <View style={[styles.statusBar, { backgroundColor: t.card, borderColor: t.border }]}>
-        <View style={{ flex: 1 }}>
+        <View style={{ flex: 1, minWidth: 220 }}>
           <Text style={[styles.statusText, { color: t.text }]}>
             ✈️ {aircraft.length} letadel{matchedCount > 0 && ` · ${matchedCount} spárováno`}
           </Text>
@@ -359,6 +561,7 @@ export const MapScreen: React.FC = () => {
                 minute: "2-digit",
                 second: "2-digit",
               })}
+              {" · radius 250 NM"}
             </Text>
           )}
           {focusFlightId && !matched.some((m) => m.flight?.id === focusFlightId) && (
@@ -411,6 +614,15 @@ export const MapScreen: React.FC = () => {
             <ActivityIndicator color={t.accent} />
           </View>
         )}
+        {selectedMatched && (
+          <SelectedFlightPanel
+            aircraft={selectedMatched.aircraft}
+            flight={selectedMatched.flight}
+            t={t}
+            onClose={() => setSelectedIcao(null)}
+            onOpenDetail={(f) => nav.navigate("FlightDetail", { flight: f })}
+          />
+        )}
         {/* @ts-ignore react-leaflet types */}
         <MapContainer
           center={PRG_COORDS}
@@ -440,10 +652,6 @@ export const MapScreen: React.FC = () => {
             </Popup>
           </CircleMarker>
           {matched.map(({ aircraft: a, flight: f }) => {
-            const distKm = haversineKm(PRG_COORDS[0], PRG_COORDS[1], a.latitude, a.longitude)
-            // Color encodes state at a glance:
-            //   green = arrival to PRG, blue = departure from PRG,
-            //   yellow = airborne transit, gray = on ground.
             const color = a.onGround
               ? t.textMuted
               : f
@@ -455,7 +663,6 @@ export const MapScreen: React.FC = () => {
             const counterCoords = f ? getAirportCoords(f.counterpart.iata) : null
             return (
               <React.Fragment key={a.icao24}>
-                {/* Radar-style PRG connection line for matched airborne flights. */}
                 {showRadar && f && !a.onGround && !selected && (
                   <Polyline
                     positions={[[a.latitude, a.longitude], PRG_COORDS]}
@@ -513,12 +720,9 @@ export const MapScreen: React.FC = () => {
                   flight={f}
                   selected={selected}
                   color={color}
-                  accent={t.accent}
-                  distKm={distKm}
                   onToggle={() =>
                     setSelectedIcao((prev) => (prev === a.icao24 ? null : a.icao24))
                   }
-                  onOpenDetail={(ff) => nav.navigate("FlightDetail", { flight: ff })}
                 />
               </React.Fragment>
             )

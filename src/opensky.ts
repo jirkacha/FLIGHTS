@@ -25,7 +25,11 @@ export type LiveAircraft = {
 
 const PRG_LAT = 50.1008
 const PRG_LON = 14.26
-const RADIUS_NM = 100 // ~185 km
+// 250 NM (~463 km) is the maximum that both adsb.lol and airplanes.live
+// accept for /v2/point queries. At this radius we catch arriving traffic
+// already on descent from Munich, Vienna, Berlin, Warsaw, Budapest — which
+// is what users expect from a "live arrivals" view.
+const RADIUS_NM = 250
 
 type RawAircraft = {
   hex: string

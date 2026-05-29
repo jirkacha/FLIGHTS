@@ -57,6 +57,14 @@ export const fmtTime = (iso?: string): string => {
   }
 }
 
+/** "29. 05." — short Czech-style day/month, no year. */
+export const fmtDateShort = (iso?: string): string => {
+  if (!iso) return ""
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ""
+  return `${d.getDate()}. ${String(d.getMonth() + 1).padStart(2, "0")}.`
+}
+
 /** Format minute count as "+1 h 25 min" / "+25 min". */
 export const fmtDelay = (min: number): string => {
   const sign = min < 0 ? "−" : "+"
