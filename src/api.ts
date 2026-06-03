@@ -3,9 +3,10 @@ import { MOCK_FLIGHTS } from "./mockData"
 import { effectiveTime } from "./utils"
 
 const RAPIDAPI_KEY = process.env.EXPO_PUBLIC_RAPIDAPI_KEY ?? ""
+const USE_MOCK = process.env.EXPO_PUBLIC_USE_MOCK === "1"
 const HOST = "aerodatabox.p.rapidapi.com"
 const AIRPORT_IATA = "PRG"
-const CACHE_TTL_MS = 60_000
+const CACHE_TTL_MS = 5 * 60_000 // 5 min — arrivals/departures change slowly
 
 const pad = (n: number) => n.toString().padStart(2, "0")
 const fmt = (d: Date) =>
@@ -68,14 +69,50 @@ type CacheEntry = { ts: number; arrivals: Flight[]; departures: Flight[]; isMock
 let cache: CacheEntry | null = null
 let inflight: Promise<CacheEntry> | null = null
 
+// Persisted cache survives full reloads so the user doesn't burn one AeroDataBox
+// quota unit per tab-open. Without this a 1500/month BASIC plan is exhausted by
+// a single dev's idle browsing in days.
+const LS_KEY = "prg-flights:flightCache:v1"
+
+const loadPersistedCache = (): CacheEntry | null => {
+  if (typeof window === "undefined" || !window.localStorage) return null
+  try {
+    const raw = window.localStorage.getItem(LS_KEY)
+    if (!raw) return null
+    const entry = JSON.parse(raw) as CacheEntry
+    if (typeof entry?.ts !== "number") return null
+    return entry
+  } catch {
+    return null
+  }
+}
+
+const persistCache = (entry: CacheEntry) => {
+  if (typeof window === "undefined" || !window.localStorage) return
+  // Mock results aren't worth persisting — they're regenerated cheaply and
+  // would shadow a real recovery on the next reload.
+  if (entry.isMock) return
+  try {
+    window.localStorage.setItem(LS_KEY, JSON.stringify(entry))
+  } catch {
+    // Quota / private mode — ignore.
+  }
+}
+
+// Hydrate from localStorage at module init so the very first call after reload
+// can satisfy from cache without touching the network.
+cache = loadPersistedCache()
+
+const mockEntry = (): CacheEntry => ({
+  ts: Date.now(),
+  arrivals: MOCK_FLIGHTS.filter((f) => f.direction === "arrival"),
+  departures: MOCK_FLIGHTS.filter((f) => f.direction === "departure"),
+  isMock: true,
+})
+
 const fetchAll = async (): Promise<CacheEntry> => {
-  if (!RAPIDAPI_KEY) {
-    return {
-      ts: Date.now(),
-      arrivals: MOCK_FLIGHTS.filter((f) => f.direction === "arrival"),
-      departures: MOCK_FLIGHTS.filter((f) => f.direction === "departure"),
-      isMock: true,
-    }
+  if (USE_MOCK || !RAPIDAPI_KEY) {
+    return mockEntry()
   }
   const now = new Date()
   // AeroDataBox allows max 12h window. Bias toward the future so upcoming
@@ -87,7 +124,16 @@ const fetchAll = async (): Promise<CacheEntry> => {
   const res = await fetch(url, {
     headers: { "X-RapidAPI-Key": RAPIDAPI_KEY, "X-RapidAPI-Host": HOST },
   })
-  if (!res.ok) throw new Error(`AeroDataBox ${res.status}: ${await res.text().catch(() => "")}`)
+  if (!res.ok) {
+    // Quota exhaustion / rate-limiting must not blank the board. Fall back to
+    // mock data so the UI stays usable, and let the screen surface a soft
+    // warning via the existing `isMock` banner.
+    if (res.status === 429 || res.status === 402 || res.status === 403) {
+      console.warn(`AeroDataBox ${res.status} — falling back to mock data`)
+      return mockEntry()
+    }
+    throw new Error(`AeroDataBox ${res.status}: ${await res.text().catch(() => "")}`)
+  }
   const json = (await res.json()) as ApiResponse
   const sortByEffective = (a: Flight, b: Flight) =>
     effectiveTime(a).localeCompare(effectiveTime(b))
@@ -104,6 +150,7 @@ const getAll = async (force = false): Promise<CacheEntry> => {
   inflight = fetchAll()
     .then((entry) => {
       cache = entry
+      persistCache(entry)
       return entry
     })
     .finally(() => {
@@ -133,4 +180,11 @@ export const fetchAllFlights = async (force = false): Promise<{
 
 export const invalidateFlightCache = () => {
   cache = null
+  if (typeof window !== "undefined" && window.localStorage) {
+    try {
+      window.localStorage.removeItem(LS_KEY)
+    } catch {
+      // ignore
+    }
+  }
 }

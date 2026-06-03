@@ -263,13 +263,21 @@ const toggleStyles = StyleSheet.create({
     borderRadius: 8,
     padding: 3,
     borderWidth: 1,
-    alignSelf: "stretch",
+    // Explicit horizontal sizing — `alignSelf: "stretch"` is a no-op inside a row
+    // parent, which caused buttons to collapse / overlap on web when the parent
+    // used `flex-wrap: wrap`. Lock a sensible min width and don't shrink below it.
+    minWidth: 260,
+    flexShrink: 0,
   },
   btn: {
     flex: 1,
     paddingVertical: 7,
     alignItems: "center",
+    justifyContent: "center",
     borderRadius: 6,
+    // RN-Web sometimes positions the active background outside the row bounds
+    // unless every button establishes its own positioning context.
+    position: "relative",
   },
   label: { fontSize: 13, fontWeight: "600" },
 })
